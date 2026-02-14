@@ -3,13 +3,11 @@ import pandas as pd
 from datetime import datetime, timedelta
 import sys
 
-# 登录 baostock
 lg = bs.login()
 if lg.error_code != '0':
     print("登录失败")
     sys.exit(1)
 
-# 获取创业板指（399006）近300天数据
 end_date = datetime.now().strftime('%Y-%m-%d')
 start_date = (datetime.now() - timedelta(days=300)).strftime('%Y-%m-%d')
 rs = bs.query_history_k_data_plus(
@@ -34,11 +32,9 @@ df_index['date'] = pd.to_datetime(df_index['date'])
 df_index = df_index.sort_values('date')
 df_index['return_20d'] = df_index['close'].pct_change(periods=20)
 
-# 最新信号
 latest_date = df_index['date'].iloc[-1].strftime('%Y-%m-%d')
 latest_return = df_index['return_20d'].iloc[-1]
 
-# 决策
 if latest_return > 0:
     signal = '买入'
     position = '满仓创业板ETF (159915)'
@@ -46,7 +42,6 @@ else:
     signal = '卖出/空仓'
     position = '空仓 (持有银华日利 511880)'
 
-# 生成 HTML
 html_content = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -72,6 +67,5 @@ html_content = f"""<!DOCTYPE html>
 </body>
 </html>"""
 
-# 写入文件
 with open('docs/index.html', 'w', encoding='utf-8') as f:
     f.write(html_content)
