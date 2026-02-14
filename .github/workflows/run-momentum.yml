@@ -30,8 +30,14 @@ jobs:
           pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
           pip install pandas numpy baostock --no-cache-dir
 
+      # 增强的调试步骤
       - name: List files for debugging
-        run: ls -la
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Files in root:"
+          ls -la
+          echo "Files in docs (if exists):"
+          ls -la docs || echo "docs folder not found"
 
       - name: Run momentum script
         run: python momentum.py
