@@ -1,16 +1,38 @@
-import akshare as ak
+import baostock as bs
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
+import sys
 
-# 配置
-ETF_CODE = '159915'
-INDEX_CODE = 'sz399006'
-N_DAYS = 20
+# 登录 baostock
+lg = bs.login()
+if lg.error_code != '0':
+    print("登录失败")
+    sys.exit(1)
 
-# 获取指数数据
-df_index = ak.stock_zh_index_daily(symbol=INDEX_CODE)
+# 获取创业板指（399006）近300天数据
+end_date = datetime.now().strftime('%Y-%m-%d')
+start_date = (datetime.now() - timedelta(days=300)).strftime('%Y-%m-%d')
+rs = bs.query_history_k_data_plus(
+    "sz.399006",
+    "date,close",
+    start_date=start_date,
+    end_date=end_date,
+    frequency="d"
+)
+
+data_list = []
+while (rs.error_code == '0') & rs.next():
+    data_list.append(rs.get_row_data())
+
+if not data_list:
+    print("未获取到数据")
+    sys.exit(1)
+
+df_index = pd.DataFrame(data_list, columns=rs.fields)
+df_index['close'] = df_index['close'].astype(float)
+df_index['date'] = pd.to_datetime(df_index['date'])
 df_index = df_index.sort_values('date')
-df_index['return_20d'] = df_index['close'].pct_change(periods=N_DAYS)
+df_index['return_20d'] = df_index['close'].pct_change(periods=20)
 
 # 最新信号
 latest_date = df_index['date'].iloc[-1].strftime('%Y-%m-%d')
@@ -46,7 +68,7 @@ html_content = f"""<!DOCTYPE html>
     <div class="signal {'buy' if signal=='买入' else 'sell'}">{signal}</div>
     <div class="info">{position}</div>
     <hr>
-    <div>数据来源：AKShare</div>
+    <div>数据来源：baostock</div>
 </body>
 </html>"""
 
