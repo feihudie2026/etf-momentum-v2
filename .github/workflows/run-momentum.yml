@@ -26,7 +26,12 @@ jobs:
         run: python -m pip install --upgrade pip
 
       - name: Install Python dependencies
-        run: pip install pandas numpy akshare --no-cache-dir
+        run: |
+          pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+          pip install pandas numpy baostock --no-cache-dir
+
+      - name: List files for debugging
+        run: ls -la
 
       - name: Run momentum script
         run: python momentum.py
