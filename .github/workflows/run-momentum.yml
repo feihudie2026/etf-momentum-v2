@@ -8,6 +8,8 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write          # 允许推送更改到仓库
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
@@ -30,7 +32,6 @@ jobs:
           pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
           pip install pandas numpy baostock --no-cache-dir
 
-      # 增强的调试步骤
       - name: List files for debugging
         run: |
           echo "Current directory: $(pwd)"
