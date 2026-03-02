@@ -1,1 +1,21 @@
-[]
+[
+  {
+    "id": "event_20260302_iran_bullish",
+    "name": "美伊冲突-利多因子",
+    "start_date": "2026-03-02",
+    "end_date": "2026-03-07",
+    "affected_assets": ["黄金", "有色金属"],
+    "factor": 1.3,
+    "description": "事件评分5.0分（极强），避险与通胀逻辑明确利多。"
+  },
+  {
+    "id": "event_20260302_iran_bearish",
+    "name": "美伊冲突-利空因子",
+    "start_date": "2026-03-02",
+    "end_date": "2026-03-07",
+    "affected_assets": ["创业板"],
+    "factor": 0.8,
+    "description": "事件评分5.0分（极强），全球风险偏好骤降，成长股承压。"
+  }
+]
+
