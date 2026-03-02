@@ -1,11 +1,3 @@
-
----
-
-## 📄 二、完整 `momentum.py` 代码（添加了评分映射函数）
-
-请在您的仓库中，用以下代码**完全替换**原有的 `momentum.py` 文件。它包含了您之前的所有功能（多资产轮动、ADX、健康度、事件干预、动态仓位、管理链接），并新增了 **`score_to_params` 评分映射函数**，供您参考或未来扩展。
-
-```python
 import baostock as bs
 import pandas as pd
 import numpy as np
@@ -283,4 +275,253 @@ def calculate_health_score():
     drawdown = (df_market['nav'] - peak) / peak
     current_drawdown = drawdown.iloc[-1]
     ret_series = df_market['strategy_return'].dropna()
-  
+    if len(ret_series) > 0:
+        excess_ret = ret_series.mean() * 252 - 0.02
+        vol = ret_series.std() * np.sqrt(252)
+        sharpe = excess_ret / vol if vol != 0 else 0
+    else:
+        sharpe = 0
+
+    score = 0
+    if win_rate >= 0.4: score += 30
+    elif win_rate >= 0.35: score += 20
+    elif win_rate >= 0.3: score += 10
+    else: score += 0
+
+    if cons_loss <= 2: score += 25
+    elif cons_loss <= 4: score += 15
+    elif cons_loss <= 5: score += 5
+    else: score += 0
+
+    if current_drawdown >= -0.05: score += 25
+    elif current_drawdown >= -0.10: score += 15
+    elif current_drawdown >= -0.15: score += 5
+    else: score += 0
+
+    if sharpe >= 1.0: score += 20
+    elif sharpe >= 0.5: score += 10
+    elif sharpe >= 0: score += 5
+    else: score += 0
+
+    return score, win_rate, cons_loss, current_drawdown, sharpe
+
+health_score, health_win_rate, health_cons_loss, health_drawdown, health_sharpe = calculate_health_score()
+
+if health_score >= 70:
+    health_status = "健康"
+    health_color = "green"
+    health_advice = "策略运行正常，按信号执行。"
+elif health_score >= 40:
+    health_status = "警惕"
+    health_color = "orange"
+    health_advice = "近期表现偏弱，密切关注回撤，但暂不停止。"
+else:
+    health_status = "警告"
+    health_color = "red"
+    health_advice = "⚠️ 策略可能失效，建议暂停交易，进入观察模式！"
+
+# ====================== 动态仓位建议（简单三档）======================
+if best and best_etf != ETF_SAFE:
+    mom = best['adjusted_momentum']
+    if mom > 0.15:
+        suggested_position = "80-100%"
+    elif mom > 0.08:
+        suggested_position = "50-80%"
+    elif mom > 0.02:
+        suggested_position = "20-50%"
+    else:
+        suggested_position = "0%"
+else:
+    suggested_position = "0%"
+
+# ====================== 生成 HTML 页面 ======================
+html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多品种动量轮动+健康预警</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(145deg, #f0f2f5 0%, #e6e9f0 100%);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }}
+        .card {{
+            background: rgba(255,255,255,0.9);
+            backdrop-filter: blur(8px);
+            border-radius: 36px;
+            padding: 30px 25px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            max-width: 450px;
+            width: 100%;
+        }}
+        h1 {{ font-size: 22px; text-align: center; color: #1e293b; margin: 0 0 10px; }}
+        .badge {{
+            background: #0f172a; color: white; padding: 6px 14px; border-radius: 40px;
+            font-size: 14px; display: inline-block; margin-bottom: 15px;
+        }}
+        .health-bar {{
+            background-color: {health_color}; color: white; padding: 12px 18px;
+            border-radius: 40px; margin-bottom: 20px;
+            display: flex; justify-content: space-between; align-items: center;
+        }}
+        .health-text {{ font-size: 16px; font-weight: 700; }}
+        .health-score {{ font-size: 20px; font-weight: 800; }}
+        .advice-box {{
+            background: #f1f5f9; padding: 12px; border-radius: 24px;
+            margin: 15px 0; font-size: 15px; color: #1e293b;
+        }}
+        .signal {{
+            font-size: 40px; font-weight: 800; padding: 20px; border-radius: 48px;
+            text-align: center; margin: 15px 0;
+        }}
+        .strong-buy {{ background: #1e7e34; color: white; box-shadow: 0 8px 0 #0f4d1f; }}
+        .buy {{ background: #4caf50; color: white; box-shadow: 0 8px 0 #2e7d32; }}
+        .sell {{ background: #f44336; color: white; box-shadow: 0 8px 0 #b71c1c; }}
+        .position {{
+            background: #f1f5f9; padding: 18px; border-radius: 30px;
+            font-size: 18px; font-weight: 500; margin: 20px 0;
+            border: 1px solid #cbd5e1; text-align: center;
+        }}
+        .filter-info {{
+            background: #e9eef3; border-radius: 20px; padding: 15px; margin: 15px 0;
+        }}
+        .filter-item {{
+            display: flex; justify-content: space-between; margin: 5px 0;
+        }}
+        .asset-table {{
+            background: #ffffffcc; border-radius: 20px; padding: 15px; margin-top: 20px;
+        }}
+        table {{ width: 100%; border-collapse: collapse; font-size: 15px; }}
+        th, td {{ padding: 10px 5px; text-align: center; border-bottom: 1px solid #cbd5e1; }}
+        th {{ font-weight: 600; color: #334155; }}
+        .positive {{ color: #166534; font-weight: 600; }}
+        .negative {{ color: #991b1b; font-weight: 600; }}
+        .selected {{ background-color: #dcfce7; font-weight: 700; }}
+        .footer {{ font-size: 14px; color: #64748b; text-align: center; margin-top: 25px; }}
+        .event-link {{
+            margin-top: 20px;
+            text-align: center;
+        }}
+        .event-link a {{
+            background: #0f172a;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 30px;
+            text-decoration: none;
+            font-size: 14px;
+            display: inline-block;
+        }}
+        .event-link a:hover {{
+            background: #1e293b;
+        }}
+    </style>
+</head>
+<body>
+<div class="card">
+    <div style="display: flex; justify-content: space-between;">
+        <span class="badge">📊 多品种轮动+健康预警</span>
+        <span class="badge" style="background:#334155;">更新 {latest_date}</span>
+    </div>
+
+    <div class="health-bar">
+        <span class="health-text">🧠 策略状态：{health_status}</span>
+        <span class="health-score">{health_score} 分</span>
+    </div>
+    <div class="advice-box">
+        {health_advice}<br>
+        <span style="font-size:13px; color:#475569;">（基于创业板指数模拟，仅供参考）</span>
+    </div>
+
+    <h1>今日信号</h1>
+    <div class="signal {'strong-buy' if best and best['adjusted_momentum']>BUY_THRESHOLD else 'buy' if best else 'sell'}">{signal}</div>
+    <div class="position">⚡ {position}</div>
+
+    <div style="background: #e9eef3; border-radius: 20px; padding: 15px; margin: 15px 0;">
+        <div style="font-weight:600; margin-bottom:10px;">💰 建议仓位</div>
+        <div style="font-size: 32px; font-weight: 800; text-align: center;">{suggested_position}</div>
+    </div>
+
+    <div class="filter-info">
+        <div style="font-weight:600; margin-bottom:8px;">🛡️ 过滤条件</div>
+        <div class="filter-item">
+            <span>市场状态 (ADX)</span>
+            <span style="color:{'#166534' if market_adx and market_adx>=ADX_TREND_THRESHOLD else '#991b1b'}">
+                {market_adx:.1f} {'✅趋势' if market_adx and market_adx>=ADX_TREND_THRESHOLD else '❌震荡' if market_adx else '未知'}
+            </span>
+        </div>
+        <div class="filter-item">
+            <span>买入阈值 >{BUY_THRESHOLD:.0%}</span>
+            <span style="color:{'#166534' if best and best['adjusted_momentum']>BUY_THRESHOLD else '#991b1b'}">
+                最强 {asset_momentums[0]['adjusted_momentum']:.1%} {'✅满足' if best and best['adjusted_momentum']>BUY_THRESHOLD else '❌不满足' if best else '无'}
+            </span>
+        </div>
+        <div class="filter-item">
+            <span>卖出阈值 <{SELL_THRESHOLD:.0%}</span>
+            <span style="color:{'#991b1b' if best is None else '#166534'}">
+                {asset_momentums[0]['adjusted_momentum']:.1%} {'❌空仓' if best is None else '✅持有'}
+            </span>
+        </div>
+    </div>
+
+    <!-- 当前生效事件展示 -->
+    {f'<div style="background:#fef9c3; border-radius:20px; padding:15px; margin:15px 0;"><div style="font-weight:600; margin-bottom:8px;">📢 当前生效事件</div>'+''.join([f"<div>• {e['name']}: {e['description']}</div>" for e in current_events])+'</div>' if current_events else ''}
+
+    <div class="asset-table">
+        <div style="font-weight:600; margin-bottom:10px;">📋 各品种20日动量排序（调整后）</div>
+        <table>
+            <tr><th>品种</th><th>20日涨幅</th><th>调整后</th><th>状态</th></tr>
+            {''.join([
+                f"<tr class=\"{'selected' if a == best else ''}\">"
+                f"<td>{a['name']}</td>"
+                f"<td class=\"{'positive' if a['momentum']>0 else 'negative'}\">{a['momentum']:.2%}</td>"
+                f"<td>{a['adjusted_momentum']:.2%}</td>"
+                f"<td>{'✅ 选中' if a == best else ''}</td></tr>"
+                for a in asset_momentums
+            ])}
+        </table>
+    </div>
+
+    <!-- 方案一：人工干预链接 -->
+    <div class="event-link">
+        <a href="https://github.com/feihudie2026/etf-momentum-v2/edit/main/events_config.json" target="_blank">
+            ✏️ 管理人工干预事件
+        </a>
+    </div>
+
+    <div class="footer">
+        🤖 每日14:30更新 · 执行时间 14:50<br>
+        空仓时持有 {ETF_SAFE} (银华日利)<br>
+        健康度指标基于创业板指数模拟，非实盘收益。
+    </div>
+</div>
+</body>
+</html>
+"""
+
+# 写入 HTML 文件
+with open('docs/index.html', 'w', encoding='utf-8') as f:
+    f.write(html_content)
+
+# 记录信号到 CSV
+record = pd.DataFrame([{
+    'date': latest_date,
+    'selected': best['name'] if best else '空仓',
+    'etf': best_etf,
+    'market_adx': market_adx,
+    'top_momentum': asset_momentums[0]['momentum'] if asset_momentums else 0,
+    'health_score': health_score,
+    'health_status': health_status
+}])
+csv_path = 'docs/signals.csv'
+if os.path.exists(csv_path):
+    old = pd.read_csv(csv_path)
+    combined = pd.concat([old, record], ignore_index=True)
+else:
+    combined = record
+combined.to_csv(csv_path, index=False)
