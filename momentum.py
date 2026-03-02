@@ -21,6 +21,7 @@ ASSETS = [
     {"name": "有色金属", "index_code": "sz.399807", "etf_code": "512400", "use_akshare": False},
     {"name": "电力",     "index_code": "sh.000966", "etf_code": "159611", "use_akshare": False},
     {"name": "黄金",     "index_code": None,        "etf_code": "518880", "use_akshare": True},
+    {"name": "原油",     "index_code": None,        "etf_code": "501018", "use_akshare": True},  # 南方原油
 ]
 ETF_SAFE = "511880"                # 空仓时持有的货币ETF
 MOMENTUM_PERIOD = 20                # 动量周期（日）
