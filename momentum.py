@@ -1,262 +1,286 @@
+
+---
+
+## 📄 二、完整 `momentum.py` 代码（添加了评分映射函数）
+
+请在您的仓库中，用以下代码**完全替换**原有的 `momentum.py` 文件。它包含了您之前的所有功能（多资产轮动、ADX、健康度、事件干预、动态仓位、管理链接），并新增了 **`score_to_params` 评分映射函数**，供您参考或未来扩展。
+
+```python
 import baostock as bs
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 import sys
 import os
+import json
 
-# ====================== 原有数据获取部分 ======================
-lg = bs.login()
-if lg.error_code != '0':
-    print("登录失败")
-    sys.exit(1)
+# 尝试导入 akshare（用于黄金）
+try:
+    import akshare as ak
+    AKSHARE_AVAILABLE = True
+except ImportError:
+    AKSHARE_AVAILABLE = False
+    print("警告：akshare 未安装，黄金等依赖 akshare 的品种将无法获取数据")
 
-end_date = datetime.now().strftime('%Y-%m-%d')
-start_date = (datetime.now() - timedelta(days=300)).strftime('%Y-%m-%d')
-rs = bs.query_history_k_data_plus(
-    "sz.399006",
-    "date,close",
-    start_date=start_date,
-    end_date=end_date,
-    frequency="d"
-)
+# ====================== 配置参数 ======================
+ASSETS = [
+    {"name": "创业板",   "index_code": "sz.399006", "etf_code": "159915", "use_akshare": False},
+    {"name": "沪深300", "index_code": "sh.000300", "etf_code": "510300", "use_akshare": False},
+    {"name": "有色金属", "index_code": "sz.399807", "etf_code": "512400", "use_akshare": False},
+    {"name": "电力",     "index_code": "sh.000966", "etf_code": "159611", "use_akshare": False},
+    {"name": "黄金",     "index_code": None,        "etf_code": "518880", "use_akshare": True},
+]
+ETF_SAFE = "511880"                # 空仓时持有的货币ETF
+MOMENTUM_PERIOD = 20                # 动量周期（日）
+BUY_THRESHOLD = 0.08                # 买入阈值
+SELL_THRESHOLD = 0.02               # 卖出阈值
 
-data_list = []
-while (rs.error_code == '0') & rs.next():
-    data_list.append(rs.get_row_data())
+ADX_PERIOD = 14
+ADX_TREND_THRESHOLD = 25            # 低于此值视为震荡市，强制空仓
+MARKET_INDEX = "sz.399006"          # 创业板指，用于计算市场状态
 
-if not data_list:
-    print("未获取到数据")
-    sys.exit(1)
-
-df_index = pd.DataFrame(data_list, columns=rs.fields)
-df_index['close'] = df_index['close'].astype(float)
-df_index['date'] = pd.to_datetime(df_index['date'])
-df_index = df_index.sort_values('date')
-df_index['return_20d'] = df_index['close'].pct_change(periods=20)
-
-# 最新信号
-latest_date = df_index['date'].iloc[-1].strftime('%Y-%m-%d')
-latest_return = df_index['return_20d'].iloc[-1]
-
-if latest_return > 0:
-    signal = '买入'
-    position = '满仓创业板ETF (159915)'
-else:
-    signal = '卖出/空仓'
-    position = '空仓 (持有银华日利 511880)'
-
-# ====================== 新增：计算胜率和连续亏损 ======================
-# 生成交易信号序列（1=买入/持有，0=空仓）
-df_index['signal'] = (df_index['return_20d'] > 0).astype(int)
-
-# 计算策略每日收益率（第二天开盘执行，所以shift(1)）
-df_index['strategy_return'] = df_index['signal'].shift(1) * df_index['close'].pct_change()
-
-# 提取交易记录（信号发生变化的日子）
-df_index['signal_change'] = df_index['signal'] != df_index['signal'].shift(1)
-trades = df_index[df_index['signal_change']].copy()
-
-# 计算每笔交易的收益率（从信号发生到下一次信号变化的累计收益）
-trade_returns = []
-for i in range(len(trades) - 1):
-    start_date = trades.index[i]
-    end_date = trades.index[i + 1]
-    ret = (df_index.loc[end_date, 'close'] / df_index.loc[start_date, 'close']) - 1
-    # 如果是空仓信号（signal=0），收益应为0（因为持有货币基金）
-    if trades.iloc[i]['signal'] == 0:
-        ret = 0.0
-    trade_returns.append(ret)
-
-# 计算最近10笔交易的胜率
-recent_trades = trade_returns[-10:] if len(trade_returns) >= 10 else trade_returns
-win_count = sum(1 for r in recent_trades if r > 0)
-win_rate = win_count / len(recent_trades) if len(recent_trades) > 0 else 0.0
-
-# 计算当前连续亏损次数
-consecutive_losses = 0
-for r in reversed(trade_returns):
-    if r <= 0:
-        consecutive_losses += 1
+# ====================== 新增：事件评分映射函数（短期优化）======================
+def score_to_params(score):
+    """
+    根据事件评分（1-5分）返回建议的干预参数范围
+    用于帮助您将评分转化为具体的 factor 或 force_ratio
+    """
+    if score >= 4.5:
+        return {
+            "factor_range": (1.5, 2.0),
+            "force_range": (0.2, 0.3),
+            "desc": "极强"
+        }
+    elif score >= 3.5:
+        return {
+            "factor_range": (1.2, 1.5),
+            "force_range": (0.1, 0.2),
+            "desc": "强"
+        }
+    elif score >= 2.5:
+        return {
+            "factor_range": (1.1, 1.2),
+            "force_range": (0.05, 0.1),
+            "desc": "中等"
+        }
     else:
+        return {
+            "factor_range": (1.0, 1.05),
+            "force_range": (0.0, 0.05),
+            "desc": "弱"
+        }
+
+# ====================== 数据获取函数 ======================
+def fetch_index_data_baostock(index_code, days=600):
+    lg = bs.login()
+    if lg.error_code != '0':
+        raise Exception("baostock 登录失败")
+    end = datetime.now().strftime('%Y-%m-%d')
+    start = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+    rs = bs.query_history_k_data_plus(
+        index_code,
+        "date,close,high,low",
+        start_date=start,
+        end_date=end,
+        frequency="d"
+    )
+    data = []
+    while (rs.error_code == '0') & rs.next():
+        data.append(rs.get_row_data())
+    bs.logout()
+    if not data:
+        return None
+    df = pd.DataFrame(data, columns=['date','close','high','low'])
+    for col in ['close','high','low']:
+        df[col] = pd.to_numeric(df[col])
+    df['date'] = pd.to_datetime(df['date'])
+    df = df.sort_values('date').reset_index(drop=True)
+    return df
+
+def fetch_etf_data_akshare(etf_code, days=600):
+    if not AKSHARE_AVAILABLE:
+        return None
+    try:
+        end = datetime.now().strftime('%Y%m%d')
+        start = (datetime.now() - timedelta(days=days)).strftime('%Y%m%d')
+        df = ak.fund_etf_hist_em(symbol=etf_code, period="daily", start_date=start, end_date=end, adjust="qfq")
+        df = df[['日期','收盘']].rename(columns={'日期':'date','收盘':'close'})
+        df['date'] = pd.to_datetime(df['date'])
+        df['close'] = pd.to_numeric(df['close'])
+        df['high'] = df['close']
+        df['low'] = df['close']
+        df = df.sort_values('date').reset_index(drop=True)
+        return df
+    except Exception as e:
+        print(f"akshare 获取 {etf_code} 失败: {e}")
+        return None
+
+def get_asset_data(asset):
+    if asset["use_akshare"]:
+        return fetch_etf_data_akshare(asset["etf_code"])
+    else:
+        return fetch_index_data_baostock(asset["index_code"])
+
+def calc_adx(df, period=14):
+    high = df['high']
+    low = df['low']
+    close = df['close']
+    tr1 = high - low
+    tr2 = (high - close.shift()).abs()
+    tr3 = (low - close.shift()).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(period).mean()
+    up_move = high - high.shift()
+    down_move = low.shift() - low
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
+    plus_di = 100 * (pd.Series(plus_dm).rolling(period).mean() / atr)
+    minus_di = 100 * (pd.Series(minus_dm).rolling(period).mean() / atr)
+    dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di))
+    adx = dx.rolling(period).mean()
+    return adx
+
+# ====================== 获取市场 ADX ======================
+market_df = fetch_index_data_baostock(MARKET_INDEX, days=600)
+if market_df is None or len(market_df) < ADX_PERIOD + 50:
+    print("无法获取市场指数数据，ADX 过滤将失效")
+    market_adx = None
+else:
+    adx_series = calc_adx(market_df, ADX_PERIOD)
+    market_adx = adx_series.iloc[-1]
+
+# ====================== 获取所有资产的最新动量 ======================
+asset_momentums = []
+latest_date = None
+
+for asset in ASSETS:
+    df = get_asset_data(asset)
+    if df is None or len(df) < MOMENTUM_PERIOD + 1:
+        print(f"警告：{asset['name']} 数据不足，跳过")
+        continue
+    df['return'] = df['close'].pct_change(periods=MOMENTUM_PERIOD)
+    latest = df.iloc[-1]
+    momentum = latest['return']
+    last_close = latest['close']
+    asset_momentums.append({
+        "name": asset["name"],
+        "etf_code": asset["etf_code"],
+        "momentum": momentum,
+        "close": last_close,
+        "date": latest['date'].strftime('%Y-%m-%d')
+    })
+    if latest_date is None:
+        latest_date = latest['date'].strftime('%Y-%m-%d')
+
+# ====================== 读取人工干预事件 ======================
+def load_events():
+    config_path = 'events_config.json'
+    if not os.path.exists(config_path):
+        return []
+    with open(config_path, 'r', encoding='utf-8') as f:
+        try:
+            return json.load(f)
+        except:
+            return []
+
+events = load_events()
+today_str = datetime.now().strftime('%Y-%m-%d')
+current_events = [e for e in events if e.get('start_date', '') <= today_str <= e.get('end_date', '')]
+
+# 构建事件影响字典
+event_factors = {}   # 资产 -> 动量乘数
+event_force = {}     # 资产 -> 强制仓位比例
+
+for e in current_events:
+    for asset_name in e.get('affected_assets', []):
+        if 'factor' in e:
+            event_factors[asset_name] = event_factors.get(asset_name, 1.0) * e['factor']
+        if 'force_ratio' in e:
+            event_force[asset_name] = e['force_ratio']
+
+# ====================== 应用事件调整 ======================
+for asset in asset_momentums:
+    name = asset['name']
+    asset['adjusted_momentum'] = asset['momentum'] * event_factors.get(name, 1.0)
+
+# 按调整后动量排序
+asset_momentums.sort(key=lambda x: x['adjusted_momentum'], reverse=True)
+
+# ====================== 轮动决策（含ADX过滤）======================
+best = None
+# 强制配置优先
+forced_asset = None
+forced_ratio = 0
+for name, ratio in event_force.items():
+    if any(a['name'] == name for a in asset_momentums):
+        forced_asset = name
+        forced_ratio = ratio
         break
 
-# ====================== 生成HTML（方案一 + 监控指标） ======================
-html_content = f"""<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-    <title>创业板动量信号 + 监控</title>
-    <style>
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            text-align: center;
-            padding: 20px;
-            background: linear-gradient(145deg, #f5f7fa 0%, #e9ecf0 100%);
-            min-height: 100vh;
-            margin: 0;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-        }}
-        .card {{
-            background: rgba(255, 255, 255, 0.9);
-            backdrop-filter: blur(10px);
-            border-radius: 32px;
-            padding: 30px 20px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.05);
-            max-width: 400px;
-            margin: 0 auto;
-            width: 100%;
-            border: 1px solid rgba(255,255,255,0.5);
-        }}
-        h1 {{
-            font-size: 22px;
-            font-weight: 600;
-            color: #1e293b;
-            letter-spacing: 0.5px;
-            margin-top: 0;
-            margin-bottom: 20px;
-        }}
-        .signal {{
-            font-size: 48px;
-            font-weight: 800;
-            margin: 20px 0 10px;
-            padding: 20px;
-            border-radius: 48px;
-            transition: all 0.2s ease;
-        }}
-        .buy {{
-            background: #dcfce7;
-            color: #166534;
-            box-shadow: 0 8px 0 #14532d;
-        }}
-        .sell {{
-            background: #fee2e2;
-            color: #991b1b;
-            box-shadow: 0 8px 0 #7f1d1d;
-        }}
-        .position {{
-            font-size: 18px;
-            font-weight: 500;
-            color: #334155;
-            background: #f1f5f9;
-            padding: 16px;
-            border-radius: 24px;
-            margin: 20px 0;
-            border: 1px solid #cbd5e1;
-        }}
-        .info {{
-            font-size: 16px;
-            color: #475569;
-            margin: 12px 0 8px;
-            display: flex;
-            justify-content: space-between;
-            background: #ffffffcc;
-            padding: 12px 16px;
-            border-radius: 30px;
-            border: 1px solid #d1d9e6;
-        }}
-        .monitor {{
-            margin-top: 25px;
-            padding-top: 20px;
-            border-top: 2px dashed #94a3b8;
-        }}
-        .monitor-title {{
-            font-size: 16px;
-            font-weight: 600;
-            color: #0f172a;
-            margin-bottom: 12px;
-            text-align: left;
-        }}
-        .monitor-item {{
-            background: #e2e8f0;
-            border-radius: 20px;
-            padding: 12px 16px;
-            margin: 8px 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }}
-        .monitor-label {{
-            font-size: 14px;
-            color: #334155;
-        }}
-        .monitor-value {{
-            font-size: 20px;
-            font-weight: 700;
-        }}
-        .good {{
-            color: #166534;
-        }}
-        .warning {{
-            color: #b45309;
-        }}
-        .danger {{
-            color: #991b1b;
-        }}
-        .footer {{
-            font-size: 14px;
-            color: #64748b;
-            margin-top: 25px;
-            border-top: 1px dashed #cbd5e1;
-            padding-top: 18px;
-        }}
-        .update-badge {{
-            background: #0f172a;
-            color: white;
-            padding: 6px 14px;
-            border-radius: 40px;
-            font-size: 14px;
-            font-weight: 500;
-            display: inline-block;
-            margin-bottom: 8px;
-        }}
-    </style>
-</head>
-<body>
-    <div class="card">
-        <div class="update-badge">📊 实时信号 + 策略监控</div>
-        <h1>创业板动量择时</h1>
-        <div class="signal {'buy' if signal=='买入' else 'sell'}">{signal}</div>
-        <div class="position">⚡ {position}</div>
-        <div class="info">
-            <span>📅 更新日期</span>
-            <span><strong>{latest_date}</strong></span>
-        </div>
-        <div class="info">
-            <span>📈 20日涨跌幅</span>
-            <span><strong style="color:{'#16a34a' if latest_return>0 else '#dc2626'};">{latest_return:.2%}</strong></span>
-        </div>
+if forced_asset:
+    best = next(a for a in asset_momentums if a['name'] == forced_asset)
+    signal = f"人工干预：配置 {best['name']}"
+    position = f"配置 {best['etf_code']} ({best['name']}) {forced_ratio:.0%} 仓位"
+    best_etf = best['etf_code']
+else:
+    # 正常轮动
+    if asset_momentums:
+        top = asset_momentums[0]
+        market_ok = (market_adx is not None and market_adx >= ADX_TREND_THRESHOLD) or (market_adx is None)
+        if top['adjusted_momentum'] > BUY_THRESHOLD and market_ok:
+            best = top
+        elif top['adjusted_momentum'] > SELL_THRESHOLD and market_ok:
+            best = top   # 谨慎持有
+        else:
+            best = None
 
-        <!-- 新增：策略监控指标 -->
-        <div class="monitor">
-            <div class="monitor-title">📋 策略健康度监控</div>
-            <div class="monitor-item">
-                <span class="monitor-label">最近10笔胜率</span>
-                <span class="monitor-value {{
-                    'good' if win_rate >= 0.5 else 'warning' if win_rate >= 0.4 else 'danger'
-                }}">{win_rate:.1%}</span>
-            </div>
-            <div class="monitor-item">
-                <span class="monitor-label">当前连续亏损</span>
-                <span class="monitor-value {{
-                    'good' if consecutive_losses <= 2 else 'warning' if consecutive_losses <= 4 else 'danger'
-                }}">{consecutive_losses} 次</span>
-            </div>
-            <div style="font-size: 13px; color: #475569; text-align: left; margin-top: 12px; background: #f1f5f9; padding: 10px; border-radius: 16px;">
-                💡 胜率低于40%或连续亏损超4次，可能处于震荡市，坚持纪律即可。
-            </div>
-        </div>
+    if best:
+        if best['adjusted_momentum'] > BUY_THRESHOLD:
+            signal = f"强烈买入 {best['name']}"
+        else:
+            signal = f"谨慎持有 {best['name']}"
+        position = f"全仓 {best['etf_code']} ({best['name']})"
+        best_etf = best['etf_code']
+    else:
+        reason = []
+        if market_adx is not None and market_adx < ADX_TREND_THRESHOLD:
+            reason.append("市场震荡")
+        if asset_momentums and asset_momentums[0]['momentum'] <= SELL_THRESHOLD:
+            reason.append("最强动量过低")
+        reason_str = " / ".join(reason) if reason else "无合适标的"
+        signal = f"空仓 ({reason_str})"
+        position = f"全仓 {ETF_SAFE} (银华日利)"
+        best_etf = ETF_SAFE
 
-        <div class="footer">
-            🤖 自动量化策略 · 每日14:30更新<br>
-            ⏰ 交易时间 14:50 执行
-        </div>
-    </div>
-</body>
-</html>"""
-
-# 写入文件
-with open('docs/index.html', 'w', encoding='utf-8') as f:
-    f.write(html_content)
+# ====================== 策略健康度评估 ======================
+def calculate_health_score():
+    df_market = fetch_index_data_baostock(MARKET_INDEX, days=800)
+    if df_market is None or len(df_market) < 200:
+        return 50, 0, 0, 0, 0
+    df_market['return_20d'] = df_market['close'].pct_change(periods=20)
+    df_market['signal'] = (df_market['return_20d'] > 0).astype(int)
+    df_market['strategy_return'] = df_market['signal'].shift(1) * df_market['close'].pct_change()
+    df_market['nav'] = (1 + df_market['strategy_return']).cumprod()
+    df_market['signal_change'] = df_market['signal'] != df_market['signal'].shift(1)
+    trades = df_market[df_market['signal_change']].copy()
+    trade_returns = []
+    for i in range(len(trades)-1):
+        start = trades.index[i]
+        end = trades.index[i+1]
+        ret = (df_market.loc[end, 'close'] / df_market.loc[start, 'close']) - 1
+        if trades.iloc[i]['signal'] == 0:
+            ret = 0.0
+        trade_returns.append(ret)
+    recent = trade_returns[-10:] if len(trade_returns) >= 10 else trade_returns
+    win_rate = sum(1 for r in recent if r > 0) / len(recent) if recent else 0
+    cons_loss = 0
+    for r in reversed(trade_returns):
+        if r <= 0:
+            cons_loss += 1
+        else:
+            break
+    peak = df_market['nav'].expanding().max()
+    drawdown = (df_market['nav'] - peak) / peak
+    current_drawdown = drawdown.iloc[-1]
+    ret_series = df_market['strategy_return'].dropna()
+  
