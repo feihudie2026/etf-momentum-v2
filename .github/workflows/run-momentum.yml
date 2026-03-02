@@ -32,31 +32,31 @@ jobs:
           pip install --upgrade akshare
           pip install pandas numpy baostock --no-cache-dir
 
-      # 调试 akshare 数据获取
+      # ====================== 修正后的调试步骤 ======================
       - name: Test akshare data fetch
         run: |
-          python -c "
+          python -c '
 import akshare as ak
-print('='*50)
-print('测试黄金ETF 518880...')
+print("="*50)
+print("测试黄金ETF 518880...")
 try:
-    df_gold = ak.fund_etf_hist_em(symbol='518880', period='daily', start_date='20260101', end_date='20260302')
-    print(f'成功获取黄金数据，共 {len(df_gold)} 条')
-    print('最近3条记录：')
+    df_gold = ak.fund_etf_hist_em(symbol="518880", period="daily", start_date="20260101", end_date="20260302")
+    print(f"成功获取黄金数据，共 {len(df_gold)} 条")
+    print("最近3条记录：")
     print(df_gold.tail(3))
 except Exception as e:
-    print('黄金数据获取失败:', e)
+    print("黄金数据获取失败:", e)
 
-print('\\n测试原油基金 501018...')
+print("\\n测试原油基金 501018...")
 try:
-    df_oil = ak.fund_etf_hist_em(symbol='501018', period='daily', start_date='20260101', end_date='20260302')
-    print(f'成功获取原油数据，共 {len(df_oil)} 条')
-    print('最近3条记录：')
+    df_oil = ak.fund_etf_hist_em(symbol="501018", period="daily", start_date="20260101", end_date="20260302")
+    print(f"成功获取原油数据，共 {len(df_oil)} 条")
+    print("最近3条记录：")
     print(df_oil.tail(3))
 except Exception as e:
-    print('原油数据获取失败:', e)
-print('='*50)
-          "
+    print("原油数据获取失败:", e)
+print("="*50)
+'
 
       - name: List files for debugging
         run: |
@@ -73,8 +73,7 @@ print('='*50)
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add .
-          # 检查是否有变更，如有则提交并推送
+          git add docs/index.html docs/signals.csv events_config.json || true
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
