@@ -14,7 +14,17 @@ jobs:
         with:
           python-version: '3.9'
       - name: Install dependencies
-        run: pip install pandas numpy baostock
+        run: |
+          pip install pandas numpy baostock requests beautifulsoup4 lxml
+          # 如有需要可添加其他库
+      - name: Fetch news interventions
+        run: python news_fetcher.py
+      - name: Fetch north flow interventions
+        run: python north_fetcher.py
+      - name: Fetch ETF flow interventions
+        run: python flow_fetcher.py
+      - name: Fetch commodity interventions
+        run: python commodity_fetcher.py
       - name: Run momentum script
         run: python momentum.py
       - name: Commit and push if changes
@@ -22,9 +32,4 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add docs/index.html docs/signals.csv events_config.json
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Update signal and events"
-            git push
-          fi
+          git diff --staged --quiet || (git commit -m 'Update signal and events' && git push)
