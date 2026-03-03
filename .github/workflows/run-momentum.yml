@@ -19,6 +19,8 @@ jobs:
           # 如有需要可添加其他库
       - name: Fetch news interventions
         run: python news_fetcher.py
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
       - name: Fetch north flow interventions
         run: python north_fetcher.py
       - name: Fetch ETF flow interventions
