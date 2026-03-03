@@ -1,29 +1,29 @@
 [
   {
-    "id": "event_20260303_hormuz_energy",
-    "name": "霍尔木兹海峡危机推升能源价格",
-    "start_date": "2026-03-03",
-    "end_date": "2026-03-10",
-    "affected_assets": ["有色金属ETF", "黄金ETF"],
-    "factor": 1.25,
-    "description": "综合评分4.5分（强）。伊朗关闭霍尔木兹海峡威胁引发全球能源供应危机，油价暴涨超6%，直接利好资源类资产。对有色金属ETF施加正向因子以捕捉油气及战略金属涨价逻辑，同时黄金ETF受益于避险和抗通胀需求。"
-  },
-  {
-    "id": "event_20260303_risk_aversion_growth",
-    "name": "地缘风险压制成长股估值",
-    "start_date": "2026-03-03", 
-    "end_date": "2026-03-07",
-    "affected_assets": ["创业板ETF", "沪深300ETF"],
-    "factor": 0.9,
-    "description": "综合评分3.5分（中强）。全球风险偏好受冲击，对利率敏感的成长板块承压。创业板ETF受压制程度高于沪深300ETF，因前者对风险情绪更敏感。通过动量因子打折降低相关资产在轮动中的权重。"
-  },
-  {
-    "id": "event_20260303_gold_safehaven",
-    "name": "避险需求支撑黄金相对强势",
+    "id": "event_20260303_geopolitical_bullish",
+    "name": "中东地缘政治-利多因子",
     "start_date": "2026-03-03",
     "end_date": "2026-03-08",
-    "affected_assets": ["黄金ETF"],
-    "force_ratio": 0.15,
-    "description": "综合评分4.5分（强）。地缘危机下黄金展现纯粹避险属性（与白银分化），COMEX黄金涨1.68%而白银跌3.95%。设置强制仓位比例以确保组合在极端风险下的防御性，同时避免工业属性拖累。"
+    "affected_assets": ["黄金", "能源", "有色金属"],
+    "factor": 1.35,
+    "description": "事件评分4.3分（强），地缘冲突推升避险与资源需求，参考利多映射并适度增强。"
+  },
+  {
+    "id": "event_20260303_geopolitical_bearish",
+    "name": "中东地缘政治-利空因子",
+    "start_date": "2026-03-03",
+    "end_date": "2026-03-08",
+    "affected_assets": ["创业板", "半导体"],
+    "factor": 0.65,
+    "description": "事件评分4.3分（强），风险偏好下降压制成长股，参考利空更稳健特性调整为0.65。"
+  },
+  {
+    "id": "event_20260303_fed_bullish",
+    "name": "美联储政策-利多因子",
+    "start_date": "2026-03-03",
+    "end_date": "2026-03-07",
+    "affected_assets": ["黄金", "沪深300"],
+    "factor": 1.3,
+    "description": "事件评分4.4分（强），降息预期提升流动性，但市场可能已部分消化，参考利多映射。"
   }
 ]
