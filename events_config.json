@@ -1,29 +1,20 @@
 [
   {
-    "id": "event_20260302_iran_bullish",
-    "name": "美伊冲突-利多因子",
-    "start_date": "2026-03-02",
+    "id": "event_20260303_ism_bearish",
+    "name": "美国PMI利空-压制风险偏好",
+    "start_date": "2026-03-03",
     "end_date": "2026-03-07",
-    "affected_assets": ["黄金", "有色金属"],
-    "factor": 1.3,
-    "description": "事件评分5.0分（极强），避险与通胀逻辑明确利多。"
+    "affected_assets": ["创业板", "沪深300", "半导体", "有色金属"],
+    "factor": 0.7,
+    "description": "事件综合评分4.2分（强）。超预期疲软的PMI数据加剧衰退担忧，利空全球股市及工业金属。参考利空事件alpha更稳健的研究观点，给予较强下调因子。"
   },
   {
-    "id": "event_20260302_iran_bearish",
-    "name": "美伊冲突-利空因子",
-    "start_date": "2026-03-02",
+    "id": "event_20260303_redsea_bullish",
+    "name": "红海危机-利多避险与能源",
+    "start_date": "2026-03-03",
     "end_date": "2026-03-07",
-    "affected_assets": ["创业板"],
-    "factor": 0.8,
-    "description": "事件评分5.0分（极强），全球风险偏好骤降，成长股承压。"
-  },
-  {
-    "id": "event_20260302_iran_energy",
-    "name": "美伊冲突-能源利多",
-    "start_date": "2026-03-02",
-    "end_date": "2026-03-07",
-    "affected_assets": ["能源"],
+    "affected_assets": ["黄金", "能源"],
     "factor": 1.3,
-    "description": "事件评分5.0分，油价暴涨，能源板块直接受益。"
+    "description": "事件综合评分3.7分（强）。油轮遇袭事件明确利多能源价格与黄金避险需求，建议提升相关资产动量因子。"
   }
 ]
