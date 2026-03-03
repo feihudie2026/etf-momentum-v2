@@ -6,14 +6,6 @@ import sys
 import os
 import json
 
-# 尝试导入 akshare（用于黄金）
-try:
-    import akshare as ak
-    AKSHARE_AVAILABLE = True
-except ImportError:
-    AKSHARE_AVAILABLE = False
-    print("警告：akshare 未安装，黄金等依赖 akshare 的品种将无法获取数据")
-
 # ====================== 配置参数 ======================
 ASSETS = [
     {"name": "创业板",   "index_code": "sz.399006", "etf_code": "159915", "use_akshare": False},
@@ -32,17 +24,6 @@ SELL_THRESHOLD = 0.02               # 卖出阈值
 ADX_PERIOD = 14
 ADX_TREND_THRESHOLD = 25            # 低于此值视为震荡市，强制空仓
 MARKET_INDEX = "sz.399006"          # 创业板指，用于计算市场状态
-
-# ====================== 事件评分映射函数 ======================
-def score_to_params(score):
-    if score >= 4.5:
-        return {"factor_range": (1.5, 2.0), "force_range": (0.2, 0.3), "desc": "极强"}
-    elif score >= 3.5:
-        return {"factor_range": (1.2, 1.5), "force_range": (0.1, 0.2), "desc": "强"}
-    elif score >= 2.5:
-        return {"factor_range": (1.1, 1.2), "force_range": (0.05, 0.1), "desc": "中等"}
-    else:
-        return {"factor_range": (1.0, 1.05), "force_range": (0.0, 0.05), "desc": "弱"}
 
 # ====================== 数据获取函数 ======================
 def fetch_index_data_baostock(index_code, days=600):
@@ -71,29 +52,9 @@ def fetch_index_data_baostock(index_code, days=600):
     df = df.sort_values('date').reset_index(drop=True)
     return df
 
-def fetch_etf_data_akshare(etf_code, days=600):
-    if not AKSHARE_AVAILABLE:
-        return None
-    try:
-        end = datetime.now().strftime('%Y%m%d')
-        start = (datetime.now() - timedelta(days=days)).strftime('%Y%m%d')
-        df = ak.fund_etf_hist_em(symbol=etf_code, period="daily", start_date=start, end_date=end, adjust="qfq")
-        df = df[['日期','收盘']].rename(columns={'日期':'date','收盘':'close'})
-        df['date'] = pd.to_datetime(df['date'])
-        df['close'] = pd.to_numeric(df['close'])
-        df['high'] = df['close']
-        df['low'] = df['close']
-        df = df.sort_values('date').reset_index(drop=True)
-        return df
-    except Exception as e:
-        print(f"akshare 获取 {etf_code} 失败: {e}")
-        return None
-
 def get_asset_data(asset):
-    if asset["use_akshare"]:
-        return fetch_etf_data_akshare(asset["etf_code"])
-    else:
-        return fetch_index_data_baostock(asset["index_code"])
+    """统一获取资产日线数据（仅支持 baostock）"""
+    return fetch_index_data_baostock(asset["index_code"])
 
 def calc_adx(df, period=14):
     high = df['high']
@@ -161,7 +122,6 @@ events = load_events()
 today_str = datetime.now().strftime('%Y-%m-%d')
 current_events = [e for e in events if e.get('start_date', '') <= today_str <= e.get('end_date', '')]
 
-# 构建事件影响字典
 event_factors = {}   # 资产 -> 动量乘数
 event_force = {}     # 资产 -> 强制仓位比例
 
@@ -172,17 +132,15 @@ for e in current_events:
         if 'force_ratio' in e:
             event_force[asset_name] = e['force_ratio']
 
-# ====================== 应用事件调整 ======================
+# 应用事件调整
 for asset in asset_momentums:
     name = asset['name']
     asset['adjusted_momentum'] = asset['momentum'] * event_factors.get(name, 1.0)
 
-# 按调整后动量排序
 asset_momentums.sort(key=lambda x: x['adjusted_momentum'], reverse=True)
 
 # ====================== 轮动决策（含ADX过滤）======================
 best = None
-# 强制配置优先
 forced_asset = None
 forced_ratio = 0
 for name, ratio in event_force.items():
@@ -197,14 +155,13 @@ if forced_asset:
     position = f"配置 {best['etf_code']} ({best['name']}) {forced_ratio:.0%} 仓位"
     best_etf = best['etf_code']
 else:
-    # 正常轮动
     if asset_momentums:
         top = asset_momentums[0]
         market_ok = (market_adx is not None and market_adx >= ADX_TREND_THRESHOLD) or (market_adx is None)
         if top['adjusted_momentum'] > BUY_THRESHOLD and market_ok:
             best = top
         elif top['adjusted_momentum'] > SELL_THRESHOLD and market_ok:
-            best = top   # 谨慎持有
+            best = top
         else:
             best = None
 
@@ -302,7 +259,7 @@ else:
     health_color = "red"
     health_advice = "⚠️ 策略可能失效，建议暂停交易，进入观察模式！"
 
-# ====================== 动态仓位建议（简单三档）======================
+# ====================== 动态仓位建议 =======================
 if best and best_etf != ETF_SAFE:
     mom = best['adjusted_momentum']
     if mom > 0.15:
@@ -316,8 +273,34 @@ if best and best_etf != ETF_SAFE:
 else:
     suggested_position = "0%"
 
-# ====================== 生成 HTML 页面（使用 format 代替 f-string）======================
-html_template = """<!DOCTYPE html>
+# ====================== 读取干预建议（四个维度） ======================
+intervention_lines = ["【今日干预信息】"]
+sources = [
+    ('news_interventions.json', '新闻事件'),
+    ('north_interventions.json', '北向资金'),
+    ('flow_interventions.json', 'ETF资金流'),
+    ('commodity_interventions.json', '大宗商品')
+]
+for filename, label in sources:
+    if os.path.exists(filename):
+        with open(filename, 'r', encoding='utf-8') as f:
+            try:
+                data = json.load(f)
+                for item in data:
+                    asset = item.get('asset', '')
+                    direction = '利多' if item.get('direction') == 'bull' else '利空'
+                    factor = item.get('factor', '')
+                    reason = item.get('reason', '')
+                    line = f"- {label}：{reason}，建议{direction}{asset}，因子{factor}"
+                    intervention_lines.append(line)
+            except Exception as e:
+                print(f"读取 {filename} 失败: {e}")
+if len(intervention_lines) == 1:
+    intervention_lines.append("无自动生成建议。")
+intervention_text = "\n".join(intervention_lines)
+
+# ====================== 生成 HTML 页面 ======================
+html_content = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -348,8 +331,7 @@ html_template = """<!DOCTYPE html>
             font-size: 14px; display: inline-block; margin-bottom: 15px;
         }}
         .health-bar {{
-            background-color: {health_color};
-            color: white; padding: 12px 18px;
+            background-color: {health_color}; color: white; padding: 12px 18px;
             border-radius: 40px; margin-bottom: 20px;
             display: flex; justify-content: space-between; align-items: center;
         }}
@@ -403,6 +385,33 @@ html_template = """<!DOCTYPE html>
         .event-link a:hover {{
             background: #1e293b;
         }}
+        .intervention-area {{
+            margin-top: 20px;
+            background: #f0f0f0;
+            padding: 15px;
+            border-radius: 10px;
+        }}
+        .intervention-area h4 {{
+            margin-top: 0;
+            color: #0f172a;
+        }}
+        .intervention-text {{
+            white-space: pre-wrap;
+            font-size: 14px;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }}
+        .copy-btn {{
+            margin-top: 8px;
+            padding: 8px 16px;
+            background: #0f172a;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }}
     </style>
 </head>
 <body>
@@ -422,7 +431,7 @@ html_template = """<!DOCTYPE html>
     </div>
 
     <h1>今日信号</h1>
-    <div class="signal {signal_class}">{signal}</div>
+    <div class="signal {'strong-buy' if best and best['adjusted_momentum']>BUY_THRESHOLD else 'buy' if best else 'sell'}">{signal}</div>
     <div class="position">⚡ {position}</div>
 
     <div style="background: #e9eef3; border-radius: 20px; padding: 15px; margin: 15px 0;">
@@ -434,34 +443,54 @@ html_template = """<!DOCTYPE html>
         <div style="font-weight:600; margin-bottom:8px;">🛡️ 过滤条件</div>
         <div class="filter-item">
             <span>市场状态 (ADX)</span>
-            <span style="color:{market_adx_color};">{market_adx_display}</span>
+            <span style="color:{'#166534' if market_adx and market_adx>=ADX_TREND_THRESHOLD else '#991b1b'}">
+                {market_adx:.1f} {'✅趋势' if market_adx and market_adx>=ADX_TREND_THRESHOLD else '❌震荡' if market_adx else '未知'}
+            </span>
         </div>
         <div class="filter-item">
             <span>买入阈值 >{BUY_THRESHOLD:.0%}</span>
-            <span style="color:{buy_threshold_color};">{buy_threshold_display}</span>
+            <span style="color:{'#166534' if best and best['adjusted_momentum']>BUY_THRESHOLD else '#991b1b'}">
+                最强 {asset_momentums[0]['adjusted_momentum']:.1%} {'✅满足' if best and best['adjusted_momentum']>BUY_THRESHOLD else '❌不满足' if best else '无'}
+            </span>
         </div>
         <div class="filter-item">
             <span>卖出阈值 <{SELL_THRESHOLD:.0%}</span>
-            <span style="color:{sell_threshold_color};">{sell_threshold_display}</span>
+            <span style="color:{'#991b1b' if best is None else '#166534'}">
+                {asset_momentums[0]['adjusted_momentum']:.1%} {'❌空仓' if best is None else '✅持有'}
+            </span>
         </div>
     </div>
 
     <!-- 当前生效事件展示 -->
-    {events_html}
+    {f'<div style="background:#fef9c3; border-radius:20px; padding:15px; margin:15px 0;"><div style="font-weight:600; margin-bottom:8px;">📢 当前生效事件</div>'+''.join([f"<div>• {e['name']}: {e['description']}</div>" for e in current_events])+'</div>' if current_events else ''}
 
     <div class="asset-table">
         <div style="font-weight:600; margin-bottom:10px;">📋 各品种20日动量排序（调整后）</div>
         <table>
             <tr><th>品种</th><th>20日涨幅</th><th>调整后</th><th>状态</th></tr>
-            {table_rows}
+            {''.join([
+                f"<tr class=\"{'selected' if a == best else ''}\">"
+                f"<td>{a['name']}</td>"
+                f"<td class=\"{'positive' if a['momentum']>0 else 'negative'}\">{a['momentum']:.2%}</td>"
+                f"<td>{a['adjusted_momentum']:.2%}</td>"
+                f"<td>{'✅ 选中' if a == best else ''}</td></tr>"
+                for a in asset_momentums
+            ])}
         </table>
     </div>
 
-    <!-- 方案一：人工干预链接 -->
+    <!-- 人工干预链接 -->
     <div class="event-link">
         <a href="https://github.com/feihudie2026/etf-momentum-v2/edit/main/events_config.json" target="_blank">
             ✏️ 管理人工干预事件
         </a>
+    </div>
+
+    <!-- 今日干预信息 -->
+    <div class="intervention-area">
+        <h4>💬 今日干预信息（复制后发给我）</h4>
+        <div class="intervention-text" id="interventionText">{intervention_text}</div>
+        <button class="copy-btn" onclick="copyIntervention()">📋 复制提示词</button>
     </div>
 
     <div class="footer">
@@ -470,59 +499,17 @@ html_template = """<!DOCTYPE html>
         健康度指标基于创业板指数模拟，非实盘收益。
     </div>
 </div>
+<script>
+function copyIntervention() {{
+    var text = document.getElementById('interventionText').innerText;
+    navigator.clipboard.writeText(text).then(function() {{
+        alert('提示词已复制，请粘贴到与AI的对话中');
+    }});
+}}
+</script>
 </body>
 </html>
 """
-
-# 准备模板所需的变量
-signal_class = 'strong-buy' if best and best['adjusted_momentum'] > BUY_THRESHOLD else ('buy' if best else 'sell')
-market_adx_display = f"{market_adx:.1f} {'✅趋势' if market_adx and market_adx >= ADX_TREND_THRESHOLD else '❌震荡' if market_adx else '未知'}"
-market_adx_color = '#166534' if market_adx and market_adx >= ADX_TREND_THRESHOLD else '#991b1b'
-
-buy_threshold_display = f"最强 {asset_momentums[0]['adjusted_momentum']:.1%} {'✅满足' if best and best['adjusted_momentum'] > BUY_THRESHOLD else '❌不满足' if best else '无'}"
-buy_threshold_color = '#166534' if best and best['adjusted_momentum'] > BUY_THRESHOLD else '#991b1b'
-
-sell_threshold_display = f"{asset_momentums[0]['adjusted_momentum']:.1%} {'❌空仓' if best is None else '✅持有'}"
-sell_threshold_color = '#991b1b' if best is None else '#166534'
-
-# 生成事件HTML
-if current_events:
-    events_list = ''.join([f"<div>• {e['name']}: {e['description']}</div>" for e in current_events])
-    events_html = f'<div style="background:#fef9c3; border-radius:20px; padding:15px; margin:15px 0;"><div style="font-weight:600; margin-bottom:8px;">📢 当前生效事件</div>{events_list}</div>'
-else:
-    events_html = ''
-
-# 生成表格行
-table_rows = ''
-for a in asset_momentums:
-    selected_class = 'selected' if a == best else ''
-    momentum_class = 'positive' if a['momentum'] > 0 else 'negative'
-    selected_mark = '✅ 选中' if a == best else ''
-    table_rows += f'<tr class="{selected_class}"><td>{a["name"]}</td><td class="{momentum_class}">{a["momentum"]:.2%}</td><td>{a["adjusted_momentum"]:.2%}</td><td>{selected_mark}</td></tr>'
-
-# 最终填充模板
-html_content = html_template.format(
-    health_color=health_color,
-    latest_date=latest_date,
-    health_status=health_status,
-    health_score=health_score,
-    health_advice=health_advice,
-    signal_class=signal_class,
-    signal=signal,
-    position=position,
-    suggested_position=suggested_position,
-    BUY_THRESHOLD=BUY_THRESHOLD,
-    SELL_THRESHOLD=SELL_THRESHOLD,
-    market_adx_color=market_adx_color,
-    market_adx_display=market_adx_display,
-    buy_threshold_color=buy_threshold_color,
-    buy_threshold_display=buy_threshold_display,
-    sell_threshold_color=sell_threshold_color,
-    sell_threshold_display=sell_threshold_display,
-    events_html=events_html,
-    table_rows=table_rows,
-    ETF_SAFE=ETF_SAFE
-)
 
 # 写入 HTML 文件
 with open('docs/index.html', 'w', encoding='utf-8') as f:
