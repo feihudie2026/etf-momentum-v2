@@ -1,0 +1,24 @@
+name: Intraday Monitor
+on:
+  schedule:
+    - cron: '30 3 * * *'   # 每天北京时间 11:30（UTC 3:30）
+  workflow_dispatch:
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run intraday monitor
+        run: python intraday_monitor.py
+      - name: Upload alerts
+        uses: actions/upload-artifact@v2
+        with:
+          name: intraday-alerts
+          path: intraday_alerts.json
