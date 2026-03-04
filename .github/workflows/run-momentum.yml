@@ -16,7 +16,6 @@ jobs:
       - name: Install dependencies
         run: |
           pip install pandas numpy baostock requests beautifulsoup4 lxml apify-client
-          # 如有需要可添加其他库
       - name: Fetch news interventions
         run: python news_fetcher.py
         env:
