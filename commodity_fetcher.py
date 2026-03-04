@@ -30,7 +30,7 @@ def generate_interventions(price_data):
         return []
     interventions = []
     change = price_data.get('change', 0)
-    if change > 3:
+    if change > 1:
         interventions.append({
             'asset': '能源',
             'direction': 'bull',
