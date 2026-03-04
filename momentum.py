@@ -94,14 +94,18 @@ for asset in ASSETS:
     if df is None or len(df) < MOMENTUM_PERIOD + 1:
         print(f"警告：{asset['name']} 数据不足，跳过")
         continue
-    df['return'] = df['close'].pct_change(periods=MOMENTUM_PERIOD)
+    # 计算20日和10日涨幅
+    df['return_20d'] = df['close'].pct_change(periods=MOMENTUM_PERIOD)
+    df['return_10d'] = df['close'].pct_change(periods=10)
     latest = df.iloc[-1]
-    momentum = latest['return']
+    momentum = latest['return_20d']
+    momentum_10d = latest['return_10d'] if len(df) >= 11 else None
     last_close = latest['close']
     asset_momentums.append({
         "name": asset["name"],
         "etf_code": asset["etf_code"],
         "momentum": momentum,
+        "momentum_10d": momentum_10d,
         "close": last_close,
         "date": latest['date'].strftime('%Y-%m-%d')
     })
@@ -274,6 +278,31 @@ if best and best_etf != ETF_SAFE:
 else:
     suggested_position = "0%"
 
+# ====================== 读取盘中预警 ======================
+alert_html = ""
+if os.path.exists('intraday_alerts.json'):
+    with open('intraday_alerts.json', 'r', encoding='utf-8') as f:
+        alerts = json.load(f)
+    if alerts:
+        alert_items = []
+        for a in alerts:
+            level_color = {
+                'high': '#dc2626',
+                'medium': '#f59e0b',
+                'low': '#3b82f6'
+            }.get(a.get('level', 'medium'), '#f59e0b')
+            alert_items.append(
+                f'<div style="margin:5px 0; padding:8px; border-left:4px solid {level_color}; background:#fff3cd;">'
+                f'<strong>{a["type"]}</strong>：{a["msg"]}'
+                f'</div>'
+            )
+        alert_html = f'''
+        <div style="margin-bottom:20px;">
+            <h4 style="margin:10px 0;">⚠️ 盘中预警（仅供参考）</h4>
+            {''.join(alert_items)}
+        </div>
+        '''
+
 # ====================== 融合引擎：合并四个因子的建议 ======================
 def load_interventions(filename):
     """加载单个因子JSON文件，返回建议列表"""
@@ -328,28 +357,24 @@ def merge_asset_suggestions(suggestions):
     
     # 冲突处理
     if bull_count > 0 and bear_count > 0:
-        # 有冲突，取主要方向，但因子向中性回调
         if bull_count > bear_count:
             direction = 'bull'
-            # 回调比例根据反向强度
             bear_strength = sum(s.get('strength',3) for s in suggestions if s.get('direction')=='bear')
             conflict_ratio = bear_strength / total_strength if total_strength>0 else 0
-            avg_factor = avg_factor * (1 - conflict_ratio * 0.3)  # 最多回调30%
+            avg_factor = avg_factor * (1 - conflict_ratio * 0.3)
         elif bear_count > bull_count:
             direction = 'bear'
             bull_strength = sum(s.get('strength',3) for s in suggestions if s.get('direction')=='bull')
             conflict_ratio = bull_strength / total_strength if total_strength>0 else 0
-            avg_factor = avg_factor * (1 + conflict_ratio * 0.3)  # 利空因子小于1，向1靠拢即增大
+            avg_factor = avg_factor * (1 + conflict_ratio * 0.3)
         else:
-            # 多空相等，取中性（不干预）
             return None
     else:
-        # 无冲突，取一致方向
         direction = 'bull' if bull_count > 0 else 'bear'
     
     # 收集理由
     reasons = [s.get('reason', '') for s in suggestions if s.get('reason')]
-    reason_combined = "；".join(reasons[:3])  # 最多取前3条
+    reason_combined = "；".join(reasons[:3])
     
     # 来源统计
     sources = list(set(s.get('source', '未知') for s in suggestions))
@@ -371,7 +396,6 @@ for asset, sugs in asset_groups.items():
     if merged:
         merged_list.append(merged)
 
-# 按资产名称排序
 merged_list.sort(key=lambda x: x['asset'])
 
 # 生成干预信息文本
@@ -387,7 +411,7 @@ if not merged_list:
 
 intervention_text = "\n".join(intervention_lines)
 
-# ====================== 生成 HTML 页面（使用 .format 避免 f-string 反斜杠问题）======================
+# ====================== 生成 HTML 页面 ======================
 html_template = """<!DOCTYPE html>
 <html>
 <head>
@@ -505,6 +529,7 @@ html_template = """<!DOCTYPE html>
 </head>
 <body>
 <div class="card">
+    {alert_html}
     <div style="display: flex; justify-content: space-between;">
         <span class="badge">📊 多品种轮动+健康预警</span>
         <span class="badge" style="background:#334155;">更新 {latest_date}</span>
@@ -548,9 +573,9 @@ html_template = """<!DOCTYPE html>
     {events_html}
 
     <div class="asset-table">
-        <div style="font-weight:600; margin-bottom:10px;">📋 各品种20日动量排序（调整后）</div>
+        <div style="font-weight:600; margin-bottom:10px;">📋 各品种动量排序（调整后）</div>
         <table>
-            <tr><th>品种</th><th>20日涨幅</th><th>调整后</th><th>状态</th></tr>
+            <tr><th>品种</th><th>20日涨幅</th><th>10日涨幅</th><th>调整后</th><th>状态</th></tr>
             {table_rows}
         </table>
     </div>
@@ -562,7 +587,7 @@ html_template = """<!DOCTYPE html>
         </a>
     </div>
 
-    <!-- 今日干预信息（融合后） -->
+    <!-- 今日干预信息 -->
     <div class="intervention-area">
         <h4>💬 今日干预信息（复制后发给我）</h4>
         <div class="intervention-text" id="interventionText">{intervention_text}</div>
@@ -605,16 +630,19 @@ if current_events:
 else:
     events_html = ''
 
-# 生成表格行
+# 生成表格行（含10日涨幅）
 table_rows = ''
 for a in asset_momentums:
     selected_class = 'selected' if a == best else ''
     momentum_class = 'positive' if a['momentum'] > 0 else 'negative'
+    momentum_10d_class = 'positive' if a.get('momentum_10d') and a['momentum_10d'] > 0 else 'negative' if a.get('momentum_10d') else ''
     selected_mark = '✅ 选中' if a == best else ''
-    table_rows += f'<tr class="{selected_class}"><td>{a["name"]}</td><td class="{momentum_class}">{a["momentum"]:.2%}</td><td>{a["adjusted_momentum"]:.2%}</td><td>{selected_mark}</td></tr>'
+    momentum_10d_str = f"{a['momentum_10d']:.2%}" if a['momentum_10d'] is not None else "N/A"
+    table_rows += f'<tr class="{selected_class}"><td>{a["name"]}</td><td class="{momentum_class}">{a["momentum"]:.2%}</td><td class="{momentum_10d_class}">{momentum_10d_str}</td><td>{a["adjusted_momentum"]:.2%}</td><td>{selected_mark}</td></tr>'
 
 # 最终填充模板
 html_content = html_template.format(
+    alert_html=alert_html,
     health_color=health_color,
     latest_date=latest_date,
     health_status=health_status,
