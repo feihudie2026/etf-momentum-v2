@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import sys
 import os
 import json
+from collections import defaultdict
 
 # ====================== 配置参数 ======================
 ASSETS = [
@@ -273,34 +274,121 @@ if best and best_etf != ETF_SAFE:
 else:
     suggested_position = "0%"
 
-# ====================== 读取干预建议（四个维度） ======================
-intervention_lines = ["【今日干预信息】"]
-sources = [
-    ('news_interventions.json', '新闻事件'),
-    ('north_interventions.json', '北向资金'),
-    ('flow_interventions.json', 'ETF资金流'),
-    ('commodity_interventions.json', '大宗商品')
-]
-for filename, label in sources:
-    if os.path.exists(filename):
+# ====================== 融合引擎：合并四个因子的建议 ======================
+def load_interventions(filename):
+    """加载单个因子JSON文件，返回建议列表"""
+    if not os.path.exists(filename):
+        return []
+    try:
         with open(filename, 'r', encoding='utf-8') as f:
-            try:
-                data = json.load(f)
-                for item in data:
-                    asset = item.get('asset', '')
-                    direction = '利多' if item.get('direction') == 'bull' else '利空'
-                    factor = item.get('factor', '')
-                    reason = item.get('reason', '')
-                    line = f"- {label}：{reason}，建议{direction}{asset}，因子{factor}"
-                    intervention_lines.append(line)
-            except Exception as e:
-                print(f"读取 {filename} 失败: {e}")
-if len(intervention_lines) == 1:
-    intervention_lines.append("无自动生成建议。")
+            data = json.load(f)
+            if isinstance(data, list):
+                return data
+            else:
+                return []
+    except:
+        return []
+
+# 加载所有因子
+news = load_interventions('news_interventions.json')
+north = load_interventions('north_interventions.json')
+flow = load_interventions('flow_interventions.json')
+commodity = load_interventions('commodity_interventions.json')
+
+# 合并所有建议
+all_suggestions = news + north + flow + commodity
+
+# 按资产分组
+asset_groups = defaultdict(list)
+for s in all_suggestions:
+    asset = s.get('asset')
+    if asset:
+        asset_groups[asset].append(s)
+
+def merge_asset_suggestions(suggestions):
+    """对同一资产的多个建议进行融合"""
+    if not suggestions:
+        return None
+    
+    # 方向投票
+    bull_count = sum(1 for s in suggestions if s.get('direction') == 'bull')
+    bear_count = sum(1 for s in suggestions if s.get('direction') == 'bear')
+    
+    # 强度加权因子计算
+    total_strength = 0
+    weighted_factor_sum = 0
+    for s in suggestions:
+        strength = s.get('strength', 3)
+        factor = s.get('factor', 1.0)
+        total_strength += strength
+        weighted_factor_sum += strength * factor
+    
+    avg_strength = total_strength / len(suggestions) if total_strength > 0 else 3
+    avg_factor = weighted_factor_sum / total_strength if total_strength > 0 else 1.0
+    
+    # 冲突处理
+    if bull_count > 0 and bear_count > 0:
+        # 有冲突，取主要方向，但因子向中性回调
+        if bull_count > bear_count:
+            direction = 'bull'
+            # 回调比例根据反向强度
+            bear_strength = sum(s.get('strength',3) for s in suggestions if s.get('direction')=='bear')
+            conflict_ratio = bear_strength / total_strength if total_strength>0 else 0
+            avg_factor = avg_factor * (1 - conflict_ratio * 0.3)  # 最多回调30%
+        elif bear_count > bull_count:
+            direction = 'bear'
+            bull_strength = sum(s.get('strength',3) for s in suggestions if s.get('direction')=='bull')
+            conflict_ratio = bull_strength / total_strength if total_strength>0 else 0
+            avg_factor = avg_factor * (1 + conflict_ratio * 0.3)  # 利空因子小于1，向1靠拢即增大
+        else:
+            # 多空相等，取中性（不干预）
+            return None
+    else:
+        # 无冲突，取一致方向
+        direction = 'bull' if bull_count > 0 else 'bear'
+    
+    # 收集理由
+    reasons = [s.get('reason', '') for s in suggestions if s.get('reason')]
+    reason_combined = "；".join(reasons[:3])  # 最多取前3条
+    
+    # 来源统计
+    sources = list(set(s.get('source', '未知') for s in suggestions))
+    
+    return {
+        'asset': asset,
+        'direction': direction,
+        'factor': round(avg_factor, 2),
+        'strength': round(avg_strength, 1),
+        'reason': reason_combined,
+        'sources': sources,
+        'count': len(suggestions)
+    }
+
+# 融合所有资产
+merged_list = []
+for asset, sugs in asset_groups.items():
+    merged = merge_asset_suggestions(sugs)
+    if merged:
+        merged_list.append(merged)
+
+# 按资产名称排序
+merged_list.sort(key=lambda x: x['asset'])
+
+# 生成干预信息文本
+intervention_lines = ["【今日干预信息】"]
+for m in merged_list:
+    direction_cn = "利多" if m['direction'] == 'bull' else "利空"
+    sources_cn = "、".join(m['sources'])
+    line = f"- {m['asset']}：{direction_cn}，建议因子 {m['factor']}，强度 {m['strength']}（{sources_cn}）"
+    intervention_lines.append(line)
+
+if not merged_list:
+    intervention_lines.append("无有效干预建议。")
+
 intervention_text = "\n".join(intervention_lines)
 
-# ====================== 生成 HTML 页面 ======================
-html_content = f"""<!DOCTYPE html>
+# ====================== 生成 HTML 页面（使用 .format 避免 f-string 反斜杠问题）======================
+html_template = """<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -331,7 +419,8 @@ html_content = f"""<!DOCTYPE html>
             font-size: 14px; display: inline-block; margin-bottom: 15px;
         }}
         .health-bar {{
-            background-color: {health_color}; color: white; padding: 12px 18px;
+            background-color: {health_color};
+            color: white; padding: 12px 18px;
             border-radius: 40px; margin-bottom: 20px;
             display: flex; justify-content: space-between; align-items: center;
         }}
@@ -431,7 +520,7 @@ html_content = f"""<!DOCTYPE html>
     </div>
 
     <h1>今日信号</h1>
-    <div class="signal {'strong-buy' if best and best['adjusted_momentum']>BUY_THRESHOLD else 'buy' if best else 'sell'}">{signal}</div>
+    <div class="signal {signal_class}">{signal}</div>
     <div class="position">⚡ {position}</div>
 
     <div style="background: #e9eef3; border-radius: 20px; padding: 15px; margin: 15px 0;">
@@ -443,39 +532,26 @@ html_content = f"""<!DOCTYPE html>
         <div style="font-weight:600; margin-bottom:8px;">🛡️ 过滤条件</div>
         <div class="filter-item">
             <span>市场状态 (ADX)</span>
-            <span style="color:{'#166534' if market_adx and market_adx>=ADX_TREND_THRESHOLD else '#991b1b'}">
-                {market_adx:.1f} {'✅趋势' if market_adx and market_adx>=ADX_TREND_THRESHOLD else '❌震荡' if market_adx else '未知'}
-            </span>
+            <span style="color:{market_adx_color};">{market_adx_display}</span>
         </div>
         <div class="filter-item">
             <span>买入阈值 >{BUY_THRESHOLD:.0%}</span>
-            <span style="color:{'#166534' if best and best['adjusted_momentum']>BUY_THRESHOLD else '#991b1b'}">
-                最强 {asset_momentums[0]['adjusted_momentum']:.1%} {'✅满足' if best and best['adjusted_momentum']>BUY_THRESHOLD else '❌不满足' if best else '无'}
-            </span>
+            <span style="color:{buy_threshold_color};">{buy_threshold_display}</span>
         </div>
         <div class="filter-item">
             <span>卖出阈值 <{SELL_THRESHOLD:.0%}</span>
-            <span style="color:{'#991b1b' if best is None else '#166534'}">
-                {asset_momentums[0]['adjusted_momentum']:.1%} {'❌空仓' if best is None else '✅持有'}
-            </span>
+            <span style="color:{sell_threshold_color};">{sell_threshold_display}</span>
         </div>
     </div>
 
     <!-- 当前生效事件展示 -->
-    {f'<div style="background:#fef9c3; border-radius:20px; padding:15px; margin:15px 0;"><div style="font-weight:600; margin-bottom:8px;">📢 当前生效事件</div>'+''.join([f"<div>• {e['name']}: {e['description']}</div>" for e in current_events])+'</div>' if current_events else ''}
+    {events_html}
 
     <div class="asset-table">
         <div style="font-weight:600; margin-bottom:10px;">📋 各品种20日动量排序（调整后）</div>
         <table>
             <tr><th>品种</th><th>20日涨幅</th><th>调整后</th><th>状态</th></tr>
-            {''.join([
-                f"<tr class=\"{'selected' if a == best else ''}\">"
-                f"<td>{a['name']}</td>"
-                f"<td class=\"{'positive' if a['momentum']>0 else 'negative'}\">{a['momentum']:.2%}</td>"
-                f"<td>{a['adjusted_momentum']:.2%}</td>"
-                f"<td>{'✅ 选中' if a == best else ''}</td></tr>"
-                for a in asset_momentums
-            ])}
+            {table_rows}
         </table>
     </div>
 
@@ -486,7 +562,7 @@ html_content = f"""<!DOCTYPE html>
         </a>
     </div>
 
-    <!-- 今日干预信息 -->
+    <!-- 今日干预信息（融合后） -->
     <div class="intervention-area">
         <h4>💬 今日干预信息（复制后发给我）</h4>
         <div class="intervention-text" id="interventionText">{intervention_text}</div>
@@ -510,6 +586,57 @@ function copyIntervention() {{
 </body>
 </html>
 """
+
+# 准备模板所需的变量
+signal_class = 'strong-buy' if best and best['adjusted_momentum'] > BUY_THRESHOLD else ('buy' if best else 'sell')
+market_adx_display = f"{market_adx:.1f} {'✅趋势' if market_adx and market_adx >= ADX_TREND_THRESHOLD else '❌震荡' if market_adx else '未知'}"
+market_adx_color = '#166534' if market_adx and market_adx >= ADX_TREND_THRESHOLD else '#991b1b'
+
+buy_threshold_display = f"最强 {asset_momentums[0]['adjusted_momentum']:.1%} {'✅满足' if best and best['adjusted_momentum'] > BUY_THRESHOLD else '❌不满足' if best else '无'}"
+buy_threshold_color = '#166534' if best and best['adjusted_momentum'] > BUY_THRESHOLD else '#991b1b'
+
+sell_threshold_display = f"{asset_momentums[0]['adjusted_momentum']:.1%} {'❌空仓' if best is None else '✅持有'}"
+sell_threshold_color = '#991b1b' if best is None else '#166534'
+
+# 生成事件HTML
+if current_events:
+    events_list = ''.join([f"<div>• {e['name']}: {e['description']}</div>" for e in current_events])
+    events_html = f'<div style="background:#fef9c3; border-radius:20px; padding:15px; margin:15px 0;"><div style="font-weight:600; margin-bottom:8px;">📢 当前生效事件</div>{events_list}</div>'
+else:
+    events_html = ''
+
+# 生成表格行
+table_rows = ''
+for a in asset_momentums:
+    selected_class = 'selected' if a == best else ''
+    momentum_class = 'positive' if a['momentum'] > 0 else 'negative'
+    selected_mark = '✅ 选中' if a == best else ''
+    table_rows += f'<tr class="{selected_class}"><td>{a["name"]}</td><td class="{momentum_class}">{a["momentum"]:.2%}</td><td>{a["adjusted_momentum"]:.2%}</td><td>{selected_mark}</td></tr>'
+
+# 最终填充模板
+html_content = html_template.format(
+    health_color=health_color,
+    latest_date=latest_date,
+    health_status=health_status,
+    health_score=health_score,
+    health_advice=health_advice,
+    signal_class=signal_class,
+    signal=signal,
+    position=position,
+    suggested_position=suggested_position,
+    BUY_THRESHOLD=BUY_THRESHOLD,
+    SELL_THRESHOLD=SELL_THRESHOLD,
+    market_adx_color=market_adx_color,
+    market_adx_display=market_adx_display,
+    buy_threshold_color=buy_threshold_color,
+    buy_threshold_display=buy_threshold_display,
+    sell_threshold_color=sell_threshold_color,
+    sell_threshold_display=sell_threshold_display,
+    events_html=events_html,
+    table_rows=table_rows,
+    ETF_SAFE=ETF_SAFE,
+    intervention_text=intervention_text
+)
 
 # 写入 HTML 文件
 with open('docs/index.html', 'w', encoding='utf-8') as f:
