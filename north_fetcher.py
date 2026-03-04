@@ -1,61 +1,50 @@
 import requests
 import json
-from datetime import datetime
+from bs4 import BeautifulSoup
 
 def fetch_north_flow():
-    """从新浪财经获取北向资金实时数据"""
-    url = "https://vip.stock.finance.sina.com.cn/q/view/api/public/getData.php"
-    params = {
-        "command": "moneyflow_hsgt",
-        "page": 1,
-        "num": 1
+    """从东方财富网获取北向资金数据"""
+    url = "https://data.eastmoney.com/hsgt/index.html"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
     try:
-        resp = requests.get(url, params=params, timeout=10)
-        data = resp.json()
-        # 解析数据（新浪返回结构示例）
-        north_data = data.get('result', {}).get('data', [])
-        if north_data:
-            # 取最新一条
-            latest = north_data[0]
-            # 北向资金净流入（亿元）
-            net_inflow = float(latest.get('net_inflow', 0))
-            return {
-                'net_inflow': net_inflow,
-                'date': latest.get('date', datetime.now().strftime('%Y-%m-%d'))
-            }
+        resp = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(resp.text, 'html.parser')
+        # 解析当日净流入（需要根据实际页面结构调整选择器）
+        # 这里用简化方法：找到包含“当日资金流向”的表格
+        flow_elem = soup.find('span', {'id': 'txt_zjl'})
+        if flow_elem:
+            net_inflow = float(flow_elem.text.strip().replace(',', ''))
+            return {'net_inflow': net_inflow}
         return None
     except Exception as e:
         print(f"❌ 北向资金抓取失败: {e}")
         return None
 
 def generate_interventions(flow_data):
-    """生成干预建议"""
     if not flow_data:
         return []
-    interventions = []
     net = flow_data['net_inflow']
-    # 规则：连续3日净流入>50亿（需要历史数据，这里简化，用单日>50亿作为示例）
-    # 实际应用中，你可以存储历史数据计算连续，这里先做简单版
     if net > 50:
-        interventions.append({
+        return [{
             'asset': '沪深300',
             'direction': 'bull',
             'strength': 4,
             'factor': 1.1,
-            'reason': f"北向资金单日净流入{net:.0f}亿，外资积极入场",
+            'reason': f"北向资金净流入{net:.0f}亿",
             'source': 'north'
-        })
+        }]
     elif net < -50:
-        interventions.append({
+        return [{
             'asset': '沪深300',
             'direction': 'bear',
             'strength': 4,
             'factor': 0.9,
-            'reason': f"北向资金单日净流出{abs(net):.0f}亿，外资出逃",
+            'reason': f"北向资金净流出{abs(net):.0f}亿",
             'source': 'north'
-        })
-    return interventions
+        }]
+    return []
 
 if __name__ == "__main__":
     data = fetch_north_flow()
