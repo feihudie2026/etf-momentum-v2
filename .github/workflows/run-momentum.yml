@@ -16,22 +16,29 @@ jobs:
       - name: Install dependencies
         run: |
           pip install pandas numpy baostock requests beautifulsoup4 lxml apify-client
+      # 新闻抓取（使用国内免费API或Apify）
       - name: Fetch news interventions
         run: python news_fetcher.py
         env:
-          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
-      # 以下三个脚本暂未创建，先注释掉
-      # - name: Fetch north flow interventions
-      #   run: python north_fetcher.py
-      # - name: Fetch ETF flow interventions
-      #   run: python flow_fetcher.py
-      # - name: Fetch commodity interventions
-      #   run: python commodity_fetcher.py
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}   # 如果不使用Apify可忽略
+      # 北向资金抓取
+      - name: Fetch north flow interventions
+        run: python north_fetcher.py
+      # ETF资金流抓取
+      - name: Fetch ETF flow interventions
+        run: python flow_fetcher.py
+      # 大宗商品抓取
+      - name: Fetch commodity interventions
+        run: python commodity_fetcher.py
+      # 运行核心动量策略
       - name: Run momentum script
         run: python momentum.py
+      # 提交更新（如有变化）
       - name: Commit and push if changes
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add docs/index.html docs/signals.csv events_config.json
-          git diff --staged --quiet || (git commit -m 'Update signal and events' && git push)
+          git add docs/index.html docs/signals.csv events_config.json \
+                news_interventions.json north_interventions.json \
+                flow_interventions.json commodity_interventions.json
+          git diff --staged --quiet || (git commit -m 'Update signals and interventions' && git push)
