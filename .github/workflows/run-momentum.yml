@@ -20,12 +20,13 @@ jobs:
         run: python news_fetcher.py
         env:
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
-      - name: Fetch north flow interventions
-        run: python north_fetcher.py
-      - name: Fetch ETF flow interventions
-        run: python flow_fetcher.py
-      - name: Fetch commodity interventions
-        run: python commodity_fetcher.py
+      # 以下三个脚本暂未创建，先注释掉
+      # - name: Fetch north flow interventions
+      #   run: python north_fetcher.py
+      # - name: Fetch ETF flow interventions
+      #   run: python flow_fetcher.py
+      # - name: Fetch commodity interventions
+      #   run: python commodity_fetcher.py
       - name: Run momentum script
         run: python momentum.py
       - name: Commit and push if changes
