@@ -15,8 +15,8 @@ jobs:
           python-version: '3.9'
       - name: Install dependencies
         run: |
-          pip install pandas numpy baostock requests beautifulsoup4 lxml akshare
-      # 新闻模块暂时禁用，需要时可取消注释
+          pip install pandas numpy baostock requests
+      # 新闻模块暂时禁用
       # - name: Fetch news interventions
       #   run: python news_fetcher.py
       - name: Fetch north flow interventions
@@ -32,6 +32,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add docs/index.html docs/signals.csv events_config.json \
-                north_interventions.json flow_interventions.json \
-                commodity_interventions.json intraday_alerts.json
+                north_interventions.json flow_interventions.json commodity_interventions.json
           git diff --staged --quiet || (git commit -m 'Update signals and interventions' && git push)
