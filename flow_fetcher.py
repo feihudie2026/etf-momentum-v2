@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ETF资金流抓取模块（使用 AKShare）
-获取 ETF 实时资金流向数据，生成干预建议
+ETF资金流抓取模块（东方财富 Choice）
+获取 ETF 主力资金流向数据，生成干预建议
 输出：flow_interventions.json
 """
 
+import requests
 import json
-import akshare as ak
-import pandas as pd
+import time
 from datetime import datetime
+import pandas as pd
 
-# ====================== 资产映射（ETF代码 → 资产名称）======================
-# 根据你的资产池建立映射，务必确保代码正确
+# ETF代码与资产名称映射（请根据您的 ASSETS 列表补全）
 ETF_ASSET_MAP = {
     '159915': '创业板',
     '510300': '沪深300',
@@ -21,7 +21,6 @@ ETF_ASSET_MAP = {
     '518880': '黄金',
     '501018': '能源',
     '159995': '半导体',
-    # 以下为新增加的ETF映射，请根据你的 ASSETS 列表补充
     '159949': '创业板50',
     '561360': '油气产业',
     '513310': '中韩半导体',
@@ -33,81 +32,87 @@ ETF_ASSET_MAP = {
     '563690': '红利低波',
 }
 
-# 阈值配置
-INFLOW_THRESHOLD = 1.0  # 净流入/出超过1亿元才考虑
-CHANGE_THRESHOLD = 3.0  # 涨跌幅小于3%才视为“悄悄建仓/出货”
+# 东方财富 Choice 数据接口模板
+EM_API_TEMPLATE = "https://emdatah5.eastmoney.com/dc/zjlx/stock?fc=1.{code}&fn=基金"
 
-def fetch_etf_flow():
-    """从 AKShare 获取 ETF 实时资金流向数据"""
-    try:
-        # 获取全市场ETF实时行情，包含资金流数据
-        df = ak.fund_etf_spot_em()
-        # 只保留我们关注的ETF
-        df = df[df['代码'].isin(ETF_ASSET_MAP.keys())].copy()
-        if df.empty:
-            print("⚠️ 未找到关注的ETF数据")
-            return []
-        return df
-    except Exception as e:
-        print(f"❌ AKShare 数据获取失败: {e}")
-        return pd.DataFrame()
+def fetch_etf_flow(etf_code, retries=2):
+    """从东方财富获取单个ETF的资金流向数据"""
+    for attempt in range(retries):
+        try:
+            url = EM_API_TEMPLATE.format(code=etf_code)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://data.eastmoney.com/'
+            }
+            resp = requests.get(url, headers=headers, timeout=10)
+            data = resp.json()
+            
+            # 解析3日/5日/10日主力资金流向 [citation:1]
+            if data and 'data' in data:
+                # 提取最近的主力资金数据
+                flow_data = data['data']
+                # 返回净流入（万元），转为亿元
+                net_3d = flow_data.get('net3', 0) / 10000  # 3日主力净流入
+                net_5d = flow_data.get('net5', 0) / 10000  # 5日主力净流入
+                net_10d = flow_data.get('net10', 0) / 10000  # 10日主力净流入
+                
+                return {
+                    'code': etf_code,
+                    'net_3d': net_3d,
+                    'net_5d': net_5d,
+                    'net_10d': net_10d,
+                    'latest_net': net_5d  # 默认用5日作为判断基准
+                }
+        except Exception as e:
+            print(f"⚠️ {etf_code} 抓取失败（尝试 {attempt+1}/{retries}）: {e}")
+        time.sleep(1)
+    return None
 
-def generate_interventions(df):
-    """根据资金流数据生成干预建议"""
+def generate_interventions():
+    """遍历所有ETF，生成干预建议"""
     interventions = []
-    for _, row in df.iterrows():
-        code = row['代码']
-        name = row['名称']
-        asset = ETF_ASSET_MAP.get(code)
-        if not asset:
+    
+    for code, asset in ETF_ASSET_MAP.items():
+        flow = fetch_etf_flow(code)
+        if not flow:
             continue
-
-        # 主力净流入（单位：元），转为亿元
-        net_inflow = row.get('主力净流入-净额', 0) / 1e8
-        change = row.get('涨跌幅', 0)  # 返回的数值如 2.5 表示 2.5%
-
-        # 规则：净流入 > 阈值 且 涨幅不大（主力悄悄建仓）
-        if net_inflow > INFLOW_THRESHOLD and abs(change) < CHANGE_THRESHOLD:
+        
+        net = flow['latest_net']  # 单位：亿元
+        
+        # 规则：净流入 > 1亿 → 利多
+        if net > 1:
             interventions.append({
                 'asset': asset,
                 'direction': 'bull',
-                'strength': 4,
-                'factor': 1.2,
-                'reason': f"{name} 主力净流入 {net_inflow:.1f} 亿，涨幅 {change:.1f}%，可能主力建仓",
+                'strength': 3 + min(int(net), 3),  # 净流入越多强度越高
+                'factor': 1.1 + min(net * 0.05, 0.2),  # 最多提升到1.3
+                'reason': f"ETF {code} 近5日主力净流入 {net:.1f} 亿",
                 'source': 'flow'
             })
-        # 规则：净流出 > 阈值 且 跌幅不大（主力悄悄出货）
-        elif net_inflow < -INFLOW_THRESHOLD and abs(change) < CHANGE_THRESHOLD:
+        # 规则：净流出 > 1亿 → 利空
+        elif net < -1:
             interventions.append({
                 'asset': asset,
                 'direction': 'bear',
-                'strength': 4,
-                'factor': 0.8,
-                'reason': f"{name} 主力净流出 {abs(net_inflow):.1f} 亿，涨幅 {change:.1f}%，主力可能出货",
+                'strength': 3 + min(abs(net), 3),
+                'factor': 0.9 - min(abs(net) * 0.05, 0.2),  # 最低降到0.7
+                'reason': f"ETF {code} 近5日主力净流出 {abs(net):.1f} 亿",
                 'source': 'flow'
             })
+    
     return interventions
 
 def main():
     print("="*60)
-    print("📊 ETF资金流抓取模块（AKShare）")
+    print("📊 ETF资金流抓取模块（东方财富 Choice）")
     print(f"⏳ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*60)
 
-    df = fetch_etf_flow()
-    if df.empty:
-        print("⚠️ 无数据，退出")
-        with open('flow_interventions.json', 'w', encoding='utf-8') as f:
-            json.dump([], f)
-        return
-
-    print(f"✅ 获取到 {len(df)} 只ETF的数据")
-    interventions = generate_interventions(df)
-
-    # 保存到文件
+    interventions = generate_interventions()
+    
     with open('flow_interventions.json', 'w', encoding='utf-8') as f:
         json.dump(interventions, f, ensure_ascii=False, indent=2)
-
+    
     print(f"📈 生成 {len(interventions)} 条干预建议")
     print("="*60)
 
