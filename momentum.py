@@ -8,38 +8,35 @@ import json
 from collections import defaultdict
 
 # ====================== 配置参数 ======================
-ASSETS = [
-# ==================== 量化轮动策略完整配置清单 ====================
 # 轮动ETF池（共12只，涵盖六大资产类别）
-ETF_LIST = [
+ASSETS = [
     # === 1. 宽基与综合 ===
-    {"name": "华泰柏瑞沪深300ETF", "index_code": "000300", "etf_code": "510300", "use_akshare": False},
-    {"name": "华安创业板50ETF", "index_code": "399673", "etf_code": "159949", "use_akshare": False},
-    
+    {"name": "华泰柏瑞沪深300ETF", "index_code": "sh.000300", "etf_code": "510300", "use_akshare": False},
+    {"name": "华安创业板50ETF", "index_code": "sz.399673", "etf_code": "159949", "use_akshare": False},
+
     # === 2. 周期与资源 ===
-    {"name": "国泰油气产业ETF", "index_code": "H30198", "etf_code": "561360", "use_akshare": False},
-    {"name": "南方有色金属ETF", "index_code": "000819", "etf_code": "512400", "use_akshare": False},
-    
+    {"name": "国泰油气产业ETF", "index_code": "sh.930229", "etf_code": "561360", "use_akshare": False},  # 中证油气产业指数
+    {"name": "南方有色金属ETF", "index_code": "sh.000819", "etf_code": "512400", "use_akshare": False},  # 中证有色金属指数
+
     # === 3. 科技成长（高波动赛道）===
-    {"name": "华泰柏瑞中韩半导体ETF", "index_code": "931790", "etf_code": "513310", "use_akshare": False},
-    {"name": "华富人工智能ETF", "index_code": "931071", "etf_code": "515980", "use_akshare": False},
-    {"name": "华夏中证机器人ETF", "index_code": "H30590", "etf_code": "562500", "use_akshare": False},
-    
+    {"name": "华泰柏瑞中韩半导体ETF", "index_code": "sh.931790", "etf_code": "513310", "use_akshare": False},
+    {"name": "华富人工智能ETF", "index_code": "sh.931071", "etf_code": "515980", "use_akshare": False},
+    {"name": "华夏中证机器人ETF", "index_code": "sh.931009", "etf_code": "562500", "use_akshare": False},  # 机器人指数
+
     # === 4. 主题与设备 ===
-    {"name": "华夏电网设备ETF", "index_code": "931994", "etf_code": "159326", "use_akshare": False},
-    
+    {"name": "华夏电网设备ETF", "index_code": "sz.399812", "etf_code": "159326", "use_akshare": False},  # 中证电网设备主题指数
+
     # === 5. 防御与避险 ===
-    {"name": "华安黄金ETF", "index_code": "AU9999", "etf_code": "518880", "use_akshare": False},
-    {"name": "永赢黄金股ETF", "index_code": "931238", "etf_code": "517520", "use_akshare": False},
-    
+    {"name": "华安黄金ETF", "index_code": "sh.000113", "etf_code": "518880", "use_akshare": False},  # 中证黄金产业指数
+    {"name": "永赢黄金股ETF", "index_code": "sh.931238", "etf_code": "517520", "use_akshare": False},
+
     # === 6. 永赢特色补充 ===
-    {"name": "永赢中证全指医疗器械ETF", "index_code": "H30217", "etf_code": "159883", "use_akshare": False},
-    {"name": "永赢中证红利低波动ETF", "index_code": "H30269", "etf_code": "563690", "use_akshare": False},
+    {"name": "永赢中证全指医疗器械ETF", "index_code": "sh.931722", "etf_code": "159883", "use_akshare": False},
+    {"name": "永赢中证红利低波动ETF", "index_code": "sh.930955", "etf_code": "563690", "use_akshare": False},
 ]
 
 # 现金管理ETF（空仓时持有，不参与轮动）
 ETF_SAFE = "511880"  # 银华日利
-
 
 MOMENTUM_PERIOD = 20                # 动量周期（日）
 BUY_THRESHOLD = 0.08                # 买入阈值
@@ -51,6 +48,7 @@ MARKET_INDEX = "sz.399006"          # 创业板指，用于计算市场状态
 
 # ====================== 数据获取函数 ======================
 def fetch_index_data_baostock(index_code, days=600):
+    """使用 baostock 获取指数日线数据"""
     lg = bs.login()
     if lg.error_code != '0':
         raise Exception("baostock 登录失败")
@@ -77,10 +75,12 @@ def fetch_index_data_baostock(index_code, days=600):
     return df
 
 def get_asset_data(asset):
-    """统一获取资产日线数据（仅支持 baostock）"""
+    """统一获取资产日线数据（目前仅支持 baostock，可扩展 akshare）"""
+    # 暂不启用 akshare，统一用 baostock
     return fetch_index_data_baostock(asset["index_code"])
 
 def calc_adx(df, period=14):
+    """计算 ADX 指标"""
     high = df['high']
     low = df['low']
     close = df['close']
