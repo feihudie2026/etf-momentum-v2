@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "asset": "能源",
+    "direction": "bear",
+    "strength": 3,
+    "factor": 0.83,
+    "reason": "模拟数据：原油价格下跌 2.5%",
+    "source": "commodity_sim"
+  }
+]
