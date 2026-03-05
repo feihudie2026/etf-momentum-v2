@@ -15,10 +15,7 @@ jobs:
           python-version: '3.9'
       - name: Install dependencies
         run: |
-          pip install pandas numpy baostock requests
-      # 新闻模块暂时禁用
-      # - name: Fetch news interventions
-      #   run: python news_fetcher.py
+          pip install pandas numpy baostock requests akshare
       - name: Fetch north flow interventions
         run: python north_fetcher.py
       - name: Fetch ETF flow interventions
