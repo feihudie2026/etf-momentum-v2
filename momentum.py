@@ -10,30 +10,29 @@ from collections import defaultdict
 # ====================== 配置参数 ======================
 # 轮动ETF池（共12只，涵盖六大资产类别）
 ASSETS = [
-    ASSETS = [
     # === 1. 宽基与综合 ===
-    {"name": "沪深300ETF", "index_code": None, "etf_code": "510300", "use_akshare": True},
-    {"name": "创业板50ETF", "index_code": None, "etf_code": "159949", "use_akshare": True},
+    {"name": "沪深300ETF", "index_code": "sh.000300", "etf_code": "510300", "use_akshare": False},
+    {"name": "创业板50ETF", "index_code": None,        "etf_code": "159949", "use_akshare": True},
 
     # === 2. 周期与资源 ===
-    {"name": "油气产业ETF", "index_code": None, "etf_code": "561360", "use_akshare": True},
-    {"name": "有色金属ETF", "index_code": None, "etf_code": "512400", "use_akshare": True},
+    {"name": "油气产业ETF", "index_code": None,        "etf_code": "561360", "use_akshare": True},
+    {"name": "有色金属ETF", "index_code": "sh.000819", "etf_code": "512400", "use_akshare": False},
 
     # === 3. 科技成长 ===
-    {"name": "中韩半导体ETF", "index_code": None, "etf_code": "513310", "use_akshare": True},
-    {"name": "人工智能ETF", "index_code": None, "etf_code": "515980", "use_akshare": True},
-    {"name": "机器人ETF", "index_code": None, "etf_code": "562500", "use_akshare": True},
+    {"name": "中韩半导体ETF", "index_code": None,      "etf_code": "513310", "use_akshare": True},
+    {"name": "人工智能ETF",   "index_code": None,      "etf_code": "515980", "use_akshare": True},
+    {"name": "机器人ETF",     "index_code": None,      "etf_code": "562500", "use_akshare": True},
 
     # === 4. 主题与设备 ===
-    {"name": "电网设备ETF", "index_code": None, "etf_code": "159326", "use_akshare": True},  # 修正重点
+    {"name": "电网设备ETF",   "index_code": None,      "etf_code": "159326", "use_akshare": True},
 
     # === 5. 防御与避险 ===
-    {"name": "黄金ETF", "index_code": None, "etf_code": "518880", "use_akshare": True},      # 华安黄金
-    {"name": "黄金股ETF", "index_code": None, "etf_code": "517520", "use_akshare": True},
+    {"name": "黄金ETF",       "index_code": None,      "etf_code": "518880", "use_akshare": True},
+    {"name": "黄金股ETF",     "index_code": None,      "etf_code": "517520", "use_akshare": True},
 
     # === 6. 永赢特色补充 ===
-    {"name": "医疗器械ETF", "index_code": None, "etf_code": "159883", "use_akshare": True},
-    {"name": "红利低波ETF", "index_code": None, "etf_code": "563690", "use_akshare": True},
+    {"name": "医疗器械ETF",   "index_code": None,      "etf_code": "159883", "use_akshare": True},
+    {"name": "红利低波ETF",   "index_code": None,      "etf_code": "563690", "use_akshare": True},
 ]
 # 现金管理ETF（空仓时持有，不参与轮动）
 ETF_SAFE = "511880"  # 银华日利
