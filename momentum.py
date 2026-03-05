@@ -5,38 +5,39 @@ from datetime import datetime, timedelta
 import sys
 import os
 import json
+import time
+import requests
 from collections import defaultdict
+import akshare as ak
 
 # ====================== 配置参数 ======================
-# 轮动ETF池（共12只，涵盖六大资产类别）
 ASSETS = [
     # === 1. 宽基与综合 ===
-    {"name": "沪深300ETF", "index_code": "sh.000300", "etf_code": "510300", "use_akshare": False},
-    {"name": "创业板50ETF", "index_code": None,        "etf_code": "159949", "use_akshare": True},
+    {"name": "沪深300ETF", "etf_code": "510300", "index_code": "sh.000300", "use_akshare": True},   # 华泰柏瑞
+    {"name": "创业板50ETF", "etf_code": "159949", "index_code": None,        "use_akshare": True},   # 华安
 
     # === 2. 周期与资源 ===
-    {"name": "油气产业ETF", "index_code": None,        "etf_code": "561360", "use_akshare": True},
-    {"name": "有色金属ETF", "index_code": "sh.000819", "etf_code": "512400", "use_akshare": False},
+    {"name": "油气产业ETF", "etf_code": "561360", "index_code": None,        "use_akshare": True},   # 国泰
+    {"name": "有色金属ETF", "etf_code": "512400", "index_code": "sh.000819", "use_akshare": True},   # 南方
 
     # === 3. 科技成长 ===
-    {"name": "中韩半导体ETF", "index_code": None,      "etf_code": "513310", "use_akshare": True},
-    {"name": "人工智能ETF",   "index_code": None,      "etf_code": "515980", "use_akshare": True},
-    {"name": "机器人ETF",     "index_code": None,      "etf_code": "562500", "use_akshare": True},
+    {"name": "中韩半导体ETF", "etf_code": "513310", "index_code": None,      "use_akshare": True},   # 华泰柏瑞
+    {"name": "人工智能ETF",   "etf_code": "515980", "index_code": None,      "use_akshare": True},   # 华富
+    {"name": "机器人ETF",     "etf_code": "562500", "index_code": None,      "use_akshare": True},   # 华夏
 
     # === 4. 主题与设备 ===
-    {"name": "电网设备ETF",   "index_code": None,      "etf_code": "159326", "use_akshare": True},
+    {"name": "电网设备ETF",   "etf_code": "159326", "index_code": None,      "use_akshare": True},   # 华夏
 
     # === 5. 防御与避险 ===
-    {"name": "黄金ETF",       "index_code": None,      "etf_code": "518880", "use_akshare": True},
-    {"name": "黄金股ETF",     "index_code": None,      "etf_code": "517520", "use_akshare": True},
+    {"name": "黄金ETF",       "etf_code": "518880", "index_code": None,      "use_akshare": True},   # 华安
+    {"name": "黄金股ETF",     "etf_code": "517520", "index_code": None,      "use_akshare": True},   # 永赢
 
     # === 6. 永赢特色补充 ===
-    {"name": "医疗器械ETF",   "index_code": None,      "etf_code": "159883", "use_akshare": True},
-    {"name": "红利低波ETF",   "index_code": None,      "etf_code": "563690", "use_akshare": True},
+    {"name": "医疗器械ETF",   "etf_code": "159883", "index_code": None,      "use_akshare": True},   # 永赢
+    {"name": "红利低波ETF",   "etf_code": "563690", "index_code": None,      "use_akshare": True},   # 永赢
 ]
-# 现金管理ETF（空仓时持有，不参与轮动）
-ETF_SAFE = "511880"  # 银华日利
 
+ETF_SAFE = "511880"                # 空仓时持有的货币ETF
 MOMENTUM_PERIOD = 20                # 动量周期（日）
 BUY_THRESHOLD = 0.08                # 买入阈值
 SELL_THRESHOLD = 0.02               # 卖出阈值
@@ -47,39 +48,110 @@ MARKET_INDEX = "sz.399006"          # 创业板指，用于计算市场状态
 
 # ====================== 数据获取函数 ======================
 def fetch_index_data_baostock(index_code, days=600):
-    """使用 baostock 获取指数日线数据"""
-    lg = bs.login()
-    if lg.error_code != '0':
-        raise Exception("baostock 登录失败")
-    end = datetime.now().strftime('%Y-%m-%d')
-    start = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-    rs = bs.query_history_k_data_plus(
-        index_code,
-        "date,close,high,low",
-        start_date=start,
-        end_date=end,
-        frequency="d"
-    )
-    data = []
-    while (rs.error_code == '0') & rs.next():
-        data.append(rs.get_row_data())
-    bs.logout()
-    if not data:
+    """使用 baostock 获取指数日线数据（备用）"""
+    try:
+        lg = bs.login()
+        if lg.error_code != '0':
+            raise Exception("baostock 登录失败")
+        end = datetime.now().strftime('%Y-%m-%d')
+        start = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+        rs = bs.query_history_k_data_plus(
+            index_code,
+            "date,close,high,low",
+            start_date=start,
+            end_date=end,
+            frequency="d"
+        )
+        data = []
+        while (rs.error_code == '0') & rs.next():
+            data.append(rs.get_row_data())
+        bs.logout()
+        if not data:
+            return None
+        df = pd.DataFrame(data, columns=['date','close','high','low'])
+        for col in ['close','high','low']:
+            df[col] = pd.to_numeric(df[col])
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.sort_values('date').reset_index(drop=True)
+        return df
+    except Exception as e:
+        print(f"baostock 获取 {index_code} 失败: {e}")
         return None
-    df = pd.DataFrame(data, columns=['date','close','high','low'])
-    for col in ['close','high','low']:
-        df[col] = pd.to_numeric(df[col])
-    df['date'] = pd.to_datetime(df['date'])
-    df = df.sort_values('date').reset_index(drop=True)
-    return df
+
+def fetch_etf_data_akshare(etf_code, days=600, retries=3):
+    """使用 akshare 获取 ETF 日线数据（主力源）"""
+    for attempt in range(retries):
+        try:
+            end = datetime.now().strftime('%Y%m%d')
+            start = (datetime.now() - timedelta(days=days)).strftime('%Y%m%d')
+            df = ak.fund_etf_hist_em(symbol=etf_code, period="daily", start_date=start, end_date=end, adjust="qfq")
+            if df is not None and len(df) > 20:
+                df = df[['日期','收盘']].rename(columns={'日期':'date','收盘':'close'})
+                df['date'] = pd.to_datetime(df['date'])
+                df['close'] = pd.to_numeric(df['close'])
+                df['high'] = df['close']
+                df['low'] = df['close']
+                df = df.sort_values('date').reset_index(drop=True)
+                return df
+            else:
+                print(f"⚠️ akshare {etf_code} 数据不足，尝试 {attempt+1}/{retries}")
+        except Exception as e:
+            print(f"❌ akshare {etf_code} 失败（尝试 {attempt+1}/{retries}）: {e}")
+        time.sleep(2)
+    return None
+
+def fetch_etf_data_tencent(etf_code, days=600):
+    """腾讯财经备用数据源"""
+    try:
+        # 判断交易所前缀
+        if str(etf_code).startswith('51'):
+            sec_id = f"1.{etf_code}"  # 沪市
+        else:
+            sec_id = f"0.{etf_code}"  # 深市
+        
+        url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+        params = {
+            'param': f'{sec_id},day,,,{days},qfq'
+        }
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        resp = requests.get(url, params=params, headers=headers, timeout=10)
+        data = resp.json()
+        if data and data['code'] == 0:
+            kline = data['data'][sec_id]['day']
+            df = pd.DataFrame(kline, columns=['date', 'open', 'close', 'high', 'low', 'volume', 'amount'])
+            df['date'] = pd.to_datetime(df['date'])
+            df['close'] = pd.to_numeric(df['close'])
+            df['high'] = pd.to_numeric(df['high'])
+            df['low'] = pd.to_numeric(df['low'])
+            df = df.sort_values('date').reset_index(drop=True)
+            return df
+    except Exception as e:
+        print(f"腾讯财经备用源获取 {etf_code} 失败: {e}")
+    return None
 
 def get_asset_data(asset):
-    """统一获取资产日线数据（目前仅支持 baostock，可扩展 akshare）"""
-    # 暂不启用 akshare，统一用 baostock
-    return fetch_index_data_baostock(asset["index_code"])
+    """统一获取资产日线数据，多源保障"""
+    # 优先使用 akshare 直接获取基金净值
+    df = fetch_etf_data_akshare(asset["etf_code"])
+    if df is not None:
+        return df
+    
+    # akshare 失败，尝试腾讯财经备用
+    print(f"⚠️ akshare 失败，尝试腾讯备用源获取 {asset['etf_code']}")
+    df = fetch_etf_data_tencent(asset["etf_code"])
+    if df is not None:
+        return df
+    
+    # 最后尝试 baostock 指数数据（仅当有指数代码时）
+    if asset["index_code"]:
+        print(f"⚠️ 尝试 baostock 指数 {asset['index_code']} 作为最终备用")
+        df = fetch_index_data_baostock(asset["index_code"])
+        if df is not None:
+            return df
+    
+    return None
 
 def calc_adx(df, period=14):
-    """计算 ADX 指标"""
     high = df['high']
     low = df['low']
     close = df['close']
@@ -116,7 +188,6 @@ for asset in ASSETS:
     if df is None or len(df) < MOMENTUM_PERIOD + 1:
         print(f"警告：{asset['name']} 数据不足，跳过")
         continue
-    # 计算20日和10日涨幅
     df['return_20d'] = df['close'].pct_change(periods=MOMENTUM_PERIOD)
     df['return_10d'] = df['close'].pct_change(periods=10)
     latest = df.iloc[-1]
@@ -149,8 +220,8 @@ events = load_events()
 today_str = datetime.now().strftime('%Y-%m-%d')
 current_events = [e for e in events if e.get('start_date', '') <= today_str <= e.get('end_date', '')]
 
-event_factors = {}   # 资产 -> 动量乘数
-event_force = {}     # 资产 -> 强制仓位比例
+event_factors = {}
+event_force = {}
 
 for e in current_events:
     for asset_name in e.get('affected_assets', []):
@@ -159,14 +230,13 @@ for e in current_events:
         if 'force_ratio' in e:
             event_force[asset_name] = e['force_ratio']
 
-# 应用事件调整
 for asset in asset_momentums:
     name = asset['name']
     asset['adjusted_momentum'] = asset['momentum'] * event_factors.get(name, 1.0)
 
 asset_momentums.sort(key=lambda x: x['adjusted_momentum'], reverse=True)
 
-# ====================== 轮动决策（含ADX过滤）======================
+# ====================== 轮动决策 ======================
 best = None
 forced_asset = None
 forced_ratio = 0
@@ -300,56 +370,25 @@ if best and best_etf != ETF_SAFE:
 else:
     suggested_position = "0%"
 
-# ====================== 读取盘中预警 ======================
-alert_html = ""
-if os.path.exists('intraday_alerts.json'):
-    with open('intraday_alerts.json', 'r', encoding='utf-8') as f:
-        alerts = json.load(f)
-    if alerts:
-        alert_items = []
-        for a in alerts:
-            level_color = {
-                'high': '#dc2626',
-                'medium': '#f59e0b',
-                'low': '#3b82f6'
-            }.get(a.get('level', 'medium'), '#f59e0b')
-            alert_items.append(
-                f'<div style="margin:5px 0; padding:8px; border-left:4px solid {level_color}; background:#fff3cd;">'
-                f'<strong>{a["type"]}</strong>：{a["msg"]}'
-                f'</div>'
-            )
-        alert_html = f'''
-        <div style="margin-bottom:20px;">
-            <h4 style="margin:10px 0;">⚠️ 盘中预警（仅供参考）</h4>
-            {''.join(alert_items)}
-        </div>
-        '''
-
-# ====================== 融合引擎：合并四个因子的建议 ======================
+# ====================== 读取干预建议 ======================
 def load_interventions(filename):
-    """加载单个因子JSON文件，返回建议列表"""
     if not os.path.exists(filename):
         return []
     try:
         with open(filename, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            if isinstance(data, list):
-                return data
-            else:
-                return []
+            return data if isinstance(data, list) else []
     except:
         return []
 
-# 加载所有因子
+# 模拟版三因子（如需真实数据源可后续替换）
 news = load_interventions('news_interventions.json')
 north = load_interventions('north_interventions.json')
 flow = load_interventions('flow_interventions.json')
 commodity = load_interventions('commodity_interventions.json')
 
-# 合并所有建议
 all_suggestions = news + north + flow + commodity
 
-# 按资产分组
 asset_groups = defaultdict(list)
 for s in all_suggestions:
     asset = s.get('asset')
@@ -357,15 +396,10 @@ for s in all_suggestions:
         asset_groups[asset].append(s)
 
 def merge_asset_suggestions(suggestions):
-    """对同一资产的多个建议进行融合"""
     if not suggestions:
         return None
-    
-    # 方向投票
     bull_count = sum(1 for s in suggestions if s.get('direction') == 'bull')
     bear_count = sum(1 for s in suggestions if s.get('direction') == 'bear')
-    
-    # 强度加权因子计算
     total_strength = 0
     weighted_factor_sum = 0
     for s in suggestions:
@@ -373,11 +407,8 @@ def merge_asset_suggestions(suggestions):
         factor = s.get('factor', 1.0)
         total_strength += strength
         weighted_factor_sum += strength * factor
-    
     avg_strength = total_strength / len(suggestions) if total_strength > 0 else 3
     avg_factor = weighted_factor_sum / total_strength if total_strength > 0 else 1.0
-    
-    # 冲突处理
     if bull_count > 0 and bear_count > 0:
         if bull_count > bear_count:
             direction = 'bull'
@@ -393,14 +424,9 @@ def merge_asset_suggestions(suggestions):
             return None
     else:
         direction = 'bull' if bull_count > 0 else 'bear'
-    
-    # 收集理由
     reasons = [s.get('reason', '') for s in suggestions if s.get('reason')]
     reason_combined = "；".join(reasons[:3])
-    
-    # 来源统计
     sources = list(set(s.get('source', '未知') for s in suggestions))
-    
     return {
         'asset': asset,
         'direction': direction,
@@ -411,7 +437,6 @@ def merge_asset_suggestions(suggestions):
         'count': len(suggestions)
     }
 
-# 融合所有资产
 merged_list = []
 for asset, sugs in asset_groups.items():
     merged = merge_asset_suggestions(sugs)
@@ -420,7 +445,6 @@ for asset, sugs in asset_groups.items():
 
 merged_list.sort(key=lambda x: x['asset'])
 
-# 生成干预信息文本
 intervention_lines = ["【今日干预信息】"]
 for m in merged_list:
     direction_cn = "利多" if m['direction'] == 'bull' else "利空"
@@ -551,7 +575,6 @@ html_template = """<!DOCTYPE html>
 </head>
 <body>
 <div class="card">
-    {alert_html}
     <div style="display: flex; justify-content: space-between;">
         <span class="badge">📊 多品种轮动+健康预警</span>
         <span class="badge" style="background:#334155;">更新 {latest_date}</span>
@@ -634,7 +657,7 @@ function copyIntervention() {{
 </html>
 """
 
-# 准备模板所需的变量
+# 准备模板变量
 signal_class = 'strong-buy' if best and best['adjusted_momentum'] > BUY_THRESHOLD else ('buy' if best else 'sell')
 market_adx_display = f"{market_adx:.1f} {'✅趋势' if market_adx and market_adx >= ADX_TREND_THRESHOLD else '❌震荡' if market_adx else '未知'}"
 market_adx_color = '#166534' if market_adx and market_adx >= ADX_TREND_THRESHOLD else '#991b1b'
@@ -645,14 +668,12 @@ buy_threshold_color = '#166534' if best and best['adjusted_momentum'] > BUY_THRE
 sell_threshold_display = f"{asset_momentums[0]['adjusted_momentum']:.1%} {'❌空仓' if best is None else '✅持有'}"
 sell_threshold_color = '#991b1b' if best is None else '#166534'
 
-# 生成事件HTML
 if current_events:
     events_list = ''.join([f"<div>• {e['name']}: {e['description']}</div>" for e in current_events])
     events_html = f'<div style="background:#fef9c3; border-radius:20px; padding:15px; margin:15px 0;"><div style="font-weight:600; margin-bottom:8px;">📢 当前生效事件</div>{events_list}</div>'
 else:
     events_html = ''
 
-# 生成表格行（含10日涨幅）
 table_rows = ''
 for a in asset_momentums:
     selected_class = 'selected' if a == best else ''
@@ -662,9 +683,7 @@ for a in asset_momentums:
     momentum_10d_str = f"{a['momentum_10d']:.2%}" if a['momentum_10d'] is not None else "N/A"
     table_rows += f'<tr class="{selected_class}"><td>{a["name"]}</td><td class="{momentum_class}">{a["momentum"]:.2%}</td><td class="{momentum_10d_class}">{momentum_10d_str}</td><td>{a["adjusted_momentum"]:.2%}</td><td>{selected_mark}</td></tr>'
 
-# 最终填充模板
 html_content = html_template.format(
-    alert_html=alert_html,
     health_color=health_color,
     latest_date=latest_date,
     health_status=health_status,
@@ -688,11 +707,9 @@ html_content = html_template.format(
     intervention_text=intervention_text
 )
 
-# 写入 HTML 文件
 with open('docs/index.html', 'w', encoding='utf-8') as f:
     f.write(html_content)
 
-# 记录信号到 CSV
 record = pd.DataFrame([{
     'date': latest_date,
     'selected': best['name'] if best else '空仓',
