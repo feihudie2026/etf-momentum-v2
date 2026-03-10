@@ -23,7 +23,6 @@ ASSETS = [
     {"name": "黄金股ETF",     "etf_code": "517520.SH"},
     {"name": "人工智能ETF",   "etf_code": "515980.SH"},
     {"name": "机器人ETF",     "etf_code": "562500.SH"},
-    # 可继续添加其他ETF
 ]
 
 ETF_SAFE = "511880"                # 空仓时持有的货币ETF
@@ -35,36 +34,52 @@ ADX_PERIOD = 14
 ADX_TREND_THRESHOLD = 25            # 低于此值视为震荡市，强制空仓
 MARKET_INDEX = "sz.399006"          # 创业板指，用于计算市场状态（仍用 baostock）
 
+# 常用通达信服务器IP（提高连接速度）
+TDX_IPS = ['119.147.212.81', '121.14.110.210', '180.153.18.170', '180.153.18.171']
+
 # ====================== 通达信数据获取函数 ======================
-def fetch_etf_data_tdx(etf_code, days=600):
+def fetch_etf_data_tdx(etf_code, days=600, retries=2):
     """
     从通达信获取 ETF 净值数据（使用 mootdx）
-    etf_code: 如 '513310.SH'（带市场后缀）
+    增加重试机制，并正确处理返回的DataFrame
     """
-    try:
-        client = Quotes.factory(market='std', bestip=True)
-        # 去掉市场后缀，如 '513310.SH' -> '513310'
-        code = etf_code.split('.')[0]
-        # 获取日线数据
-        df = client.bars(
-            symbol=code,
-            frequency=9,    # 9 = 日线
-            offset=days,
-            start=0
-        )
-        if df is None or df.empty:
-            return None
-        # 转换列名和格式
-        df = df.reset_index().rename(columns={'index': 'date'})
-        df['date'] = pd.to_datetime(df['date'])
-        # 确保浮点类型
-        for col in ['close', 'high', 'low']:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-        df = df[['date', 'close', 'high', 'low']].dropna()
-        return df
-    except Exception as e:
-        print(f"通达信数据获取失败 {etf_code}: {e}")
-        return None
+    for attempt in range(retries):
+        try:
+            # 使用指定IP快速连接，避免每次测速
+            client = Quotes.factory(market='std', bestip=False, ip=TDX_IPS[attempt % len(TDX_IPS)])
+            code = etf_code.split('.')[0]
+            df = client.bars(
+                symbol=code,
+                frequency=9,    # 9 = 日线
+                offset=days,
+                start=0
+            )
+            if df is None or df.empty:
+                print(f"警告：{etf_code} 返回空数据，尝试 {attempt+1}/{retries}")
+                time.sleep(1)
+                continue
+
+            # 重置索引，将日期从索引变为列
+            df = df.reset_index()
+            # 重命名日期列（mootdx返回的日期列可能叫 index 或 datetime）
+            if 'index' in df.columns:
+                df = df.rename(columns={'index': 'date'})
+            elif 'datetime' in df.columns:
+                df = df.rename(columns={'datetime': 'date'})
+            else:
+                # 如果没有日期列，尝试从索引提取
+                df['date'] = df.index
+            df['date'] = pd.to_datetime(df['date'])
+            # 确保浮点类型
+            for col in ['close', 'high', 'low']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            df = df[['date', 'close', 'high', 'low']].dropna()
+            return df
+        except Exception as e:
+            print(f"通达信数据获取失败 {etf_code} (尝试 {attempt+1}/{retries}): {e}")
+            time.sleep(2)
+    return None
 
 # ====================== 指数数据获取（用于ADX和健康度，仍用baostock）======================
 def fetch_index_data_baostock(index_code, days=600):
@@ -210,6 +225,8 @@ else:
             best = top
         else:
             best = None
+    else:
+        best = None
 
     if best:
         if best['adjusted_momentum'] > BUY_THRESHOLD:
@@ -404,7 +421,45 @@ if not merged_list:
 
 intervention_text = "\n".join(intervention_lines)
 
-# ====================== 生成 HTML 页面 ======================
+# ====================== 生成 HTML 页面（注意处理 asset_momentums 可能为空）======================
+if asset_momentums:
+    # 正常有数据的情况
+    signal_class = 'strong-buy' if best and best['adjusted_momentum'] > BUY_THRESHOLD else ('buy' if best else 'sell')
+    market_adx_display = f"{market_adx:.1f} {'✅趋势' if market_adx and market_adx >= ADX_TREND_THRESHOLD else '❌震荡' if market_adx else '未知'}"
+    market_adx_color = '#166534' if market_adx and market_adx >= ADX_TREND_THRESHOLD else '#991b1b'
+
+    buy_threshold_display = f"最强 {asset_momentums[0]['adjusted_momentum']:.1%} {'✅满足' if best and best['adjusted_momentum'] > BUY_THRESHOLD else '❌不满足' if best else '无'}"
+    buy_threshold_color = '#166534' if best and best['adjusted_momentum'] > BUY_THRESHOLD else '#991b1b'
+
+    sell_threshold_display = f"{asset_momentums[0]['adjusted_momentum']:.1%} {'❌空仓' if best is None else '✅持有'}"
+    sell_threshold_color = '#991b1b' if best is None else '#166534'
+
+    if current_events:
+        events_list = ''.join([f"<div>• {e['name']}: {e['description']}</div>" for e in current_events])
+        events_html = f'<div style="background:#fef9c3; border-radius:20px; padding:15px; margin:15px 0;"><div style="font-weight:600; margin-bottom:8px;">📢 当前生效事件</div>{events_list}</div>'
+    else:
+        events_html = ''
+
+    table_rows = ''
+    for a in asset_momentums:
+        selected_class = 'selected' if a == best else ''
+        momentum_class = 'positive' if a['momentum'] > 0 else 'negative'
+        momentum_10d_class = 'positive' if a.get('momentum_10d') and a['momentum_10d'] > 0 else 'negative' if a.get('momentum_10d') else ''
+        selected_mark = '✅ 选中' if a == best else ''
+        momentum_10d_str = f"{a['momentum_10d']:.2%}" if a['momentum_10d'] is not None else "N/A"
+        table_rows += f'<tr class="{selected_class}"><td>{a["name"]}</td><td class="{momentum_class}">{a["momentum"]:.2%}</td><td class="{momentum_10d_class}">{momentum_10d_str}</td><td>{a["adjusted_momentum"]:.2%}</td><td>{selected_mark}</td></tr>'
+else:
+    # 无任何资产数据时的占位显示
+    signal_class = 'sell'
+    market_adx_display = '无数据'
+    market_adx_color = '#991b1b'
+    buy_threshold_display = '无数据'
+    buy_threshold_color = '#991b1b'
+    sell_threshold_display = '无数据'
+    sell_threshold_color = '#991b1b'
+    events_html = ''
+    table_rows = '<tr><td colspan="5" style="text-align:center;">暂无有效资产数据</td></tr>'
+
 html_template = """<!DOCTYPE html>
 <html>
 <head>
@@ -604,35 +659,10 @@ function copyIntervention() {{
 </html>
 """
 
-# 准备模板变量
-signal_class = 'strong-buy' if best and best['adjusted_momentum'] > BUY_THRESHOLD else ('buy' if best else 'sell')
-market_adx_display = f"{market_adx:.1f} {'✅趋势' if market_adx and market_adx >= ADX_TREND_THRESHOLD else '❌震荡' if market_adx else '未知'}"
-market_adx_color = '#166534' if market_adx and market_adx >= ADX_TREND_THRESHOLD else '#991b1b'
-
-buy_threshold_display = f"最强 {asset_momentums[0]['adjusted_momentum']:.1%} {'✅满足' if best and best['adjusted_momentum'] > BUY_THRESHOLD else '❌不满足' if best else '无'}"
-buy_threshold_color = '#166534' if best and best['adjusted_momentum'] > BUY_THRESHOLD else '#991b1b'
-
-sell_threshold_display = f"{asset_momentums[0]['adjusted_momentum']:.1%} {'❌空仓' if best is None else '✅持有'}"
-sell_threshold_color = '#991b1b' if best is None else '#166534'
-
-if current_events:
-    events_list = ''.join([f"<div>• {e['name']}: {e['description']}</div>" for e in current_events])
-    events_html = f'<div style="background:#fef9c3; border-radius:20px; padding:15px; margin:15px 0;"><div style="font-weight:600; margin-bottom:8px;">📢 当前生效事件</div>{events_list}</div>'
-else:
-    events_html = ''
-
-table_rows = ''
-for a in asset_momentums:
-    selected_class = 'selected' if a == best else ''
-    momentum_class = 'positive' if a['momentum'] > 0 else 'negative'
-    momentum_10d_class = 'positive' if a.get('momentum_10d') and a['momentum_10d'] > 0 else 'negative' if a.get('momentum_10d') else ''
-    selected_mark = '✅ 选中' if a == best else ''
-    momentum_10d_str = f"{a['momentum_10d']:.2%}" if a['momentum_10d'] is not None else "N/A"
-    table_rows += f'<tr class="{selected_class}"><td>{a["name"]}</td><td class="{momentum_class}">{a["momentum"]:.2%}</td><td class="{momentum_10d_class}">{momentum_10d_str}</td><td>{a["adjusted_momentum"]:.2%}</td><td>{selected_mark}</td></tr>'
-
+# 填充模板
 html_content = html_template.format(
     health_color=health_color,
-    latest_date=latest_date,
+    latest_date=latest_date if latest_date else datetime.now().strftime('%Y-%m-%d'),
     health_status=health_status,
     health_score=health_score,
     health_advice=health_advice,
@@ -658,7 +688,7 @@ with open('docs/index.html', 'w', encoding='utf-8') as f:
     f.write(html_content)
 
 record = pd.DataFrame([{
-    'date': latest_date,
+    'date': latest_date if latest_date else datetime.now().strftime('%Y-%m-%d'),
     'selected': best['name'] if best else '空仓',
     'etf': best_etf,
     'market_adx': market_adx,
