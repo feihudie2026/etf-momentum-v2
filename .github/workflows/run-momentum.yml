@@ -15,7 +15,7 @@ jobs:
           python-version: '3.9'
       - name: Install dependencies
         run: |
-          pip install pandas numpy baostock requests akshare
+          pip install pandas numpy baostock requests akshare  mootdx
       - name: Fetch north flow interventions
         run: python north_fetcher.py
       - name: Fetch ETF flow interventions
