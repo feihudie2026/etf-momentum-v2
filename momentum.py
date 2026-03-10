@@ -6,35 +6,24 @@ import sys
 import os
 import json
 import time
-import requests
 from collections import defaultdict
-import akshare as ak
+from mootdx.quotes import Quotes
 
 # ====================== 配置参数 ======================
+# 使用通达信数据源（ETF必须带市场后缀 .SZ 或 .SH）
 ASSETS = [
-    # === 1. 宽基与综合 ===
-    {"name": "沪深300ETF", "etf_code": "510300", "index_code": "sh.000300", "use_akshare": True},   # 华泰柏瑞
-    {"name": "创业板50ETF", "etf_code": "159949", "index_code": None,        "use_akshare": True},   # 华安
-
-    # === 2. 周期与资源 ===
-    {"name": "油气产业ETF", "etf_code": "561360", "index_code": None,        "use_akshare": True},   # 国泰
-    {"name": "有色金属ETF", "etf_code": "512400", "index_code": "sh.000819", "use_akshare": True},   # 南方
-
-    # === 3. 科技成长 ===
-    {"name": "中韩半导体ETF", "etf_code": "513310", "index_code": None,      "use_akshare": True},   # 华泰柏瑞
-    {"name": "人工智能ETF",   "etf_code": "515980", "index_code": None,      "use_akshare": True},   # 华富
-    {"name": "机器人ETF",     "etf_code": "562500", "index_code": None,      "use_akshare": True},   # 华夏
-
-    # === 4. 主题与设备 ===
-    {"name": "电网设备ETF",   "etf_code": "159326", "index_code": None,      "use_akshare": True},   # 华夏
-
-    # === 5. 防御与避险 ===
-    {"name": "黄金ETF",       "etf_code": "518880", "index_code": None,      "use_akshare": True},   # 华安
-    {"name": "黄金股ETF",     "etf_code": "517520", "index_code": None,      "use_akshare": True},   # 永赢
-
-    # === 6. 永赢特色补充 ===
-    {"name": "医疗器械ETF",   "etf_code": "159883", "index_code": None,      "use_akshare": True},   # 永赢
-    {"name": "红利低波ETF",   "etf_code": "563690", "index_code": None,      "use_akshare": True},   # 永赢
+    {"name": "中韩半导体ETF", "etf_code": "513310.SH"},
+    {"name": "电网设备ETF",   "etf_code": "159326.SZ"},
+    {"name": "有色金属ETF",   "etf_code": "512400.SZ"},
+    {"name": "黄金ETF",       "etf_code": "518880.SH"},
+    {"name": "油气产业ETF",   "etf_code": "561360.SH"},
+    {"name": "沪深300ETF",    "etf_code": "510300.SH"},
+    {"name": "创业板50ETF",   "etf_code": "159949.SZ"},
+    {"name": "红利低波ETF",   "etf_code": "563690.SH"},
+    {"name": "黄金股ETF",     "etf_code": "517520.SH"},
+    {"name": "人工智能ETF",   "etf_code": "515980.SH"},
+    {"name": "机器人ETF",     "etf_code": "562500.SH"},
+    # 可继续添加其他ETF
 ]
 
 ETF_SAFE = "511880"                # 空仓时持有的货币ETF
@@ -44,11 +33,42 @@ SELL_THRESHOLD = 0.02               # 卖出阈值
 
 ADX_PERIOD = 14
 ADX_TREND_THRESHOLD = 25            # 低于此值视为震荡市，强制空仓
-MARKET_INDEX = "sz.399006"          # 创业板指，用于计算市场状态
+MARKET_INDEX = "sz.399006"          # 创业板指，用于计算市场状态（仍用 baostock）
 
-# ====================== 数据获取函数 ======================
+# ====================== 通达信数据获取函数 ======================
+def fetch_etf_data_tdx(etf_code, days=600):
+    """
+    从通达信获取 ETF 净值数据（使用 mootdx）
+    etf_code: 如 '513310.SH'（带市场后缀）
+    """
+    try:
+        client = Quotes.factory(market='std', bestip=True)
+        # 去掉市场后缀，如 '513310.SH' -> '513310'
+        code = etf_code.split('.')[0]
+        # 获取日线数据
+        df = client.bars(
+            symbol=code,
+            frequency=9,    # 9 = 日线
+            offset=days,
+            start=0
+        )
+        if df is None or df.empty:
+            return None
+        # 转换列名和格式
+        df = df.reset_index().rename(columns={'index': 'date'})
+        df['date'] = pd.to_datetime(df['date'])
+        # 确保浮点类型
+        for col in ['close', 'high', 'low']:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        df = df[['date', 'close', 'high', 'low']].dropna()
+        return df
+    except Exception as e:
+        print(f"通达信数据获取失败 {etf_code}: {e}")
+        return None
+
+# ====================== 指数数据获取（用于ADX和健康度，仍用baostock）======================
 def fetch_index_data_baostock(index_code, days=600):
-    """使用 baostock 获取指数日线数据（备用）"""
+    """使用 baostock 获取指数日线数据"""
     try:
         lg = bs.login()
         if lg.error_code != '0':
@@ -78,79 +98,7 @@ def fetch_index_data_baostock(index_code, days=600):
         print(f"baostock 获取 {index_code} 失败: {e}")
         return None
 
-def fetch_etf_data_akshare(etf_code, days=600, retries=3):
-    """使用 akshare 获取 ETF 日线数据（主力源）"""
-    for attempt in range(retries):
-        try:
-            end = datetime.now().strftime('%Y%m%d')
-            start = (datetime.now() - timedelta(days=days)).strftime('%Y%m%d')
-            df = ak.fund_etf_hist_em(symbol=etf_code, period="daily", start_date=start, end_date=end, adjust="qfq")
-            if df is not None and len(df) > 20:
-                df = df[['日期','收盘']].rename(columns={'日期':'date','收盘':'close'})
-                df['date'] = pd.to_datetime(df['date'])
-                df['close'] = pd.to_numeric(df['close'])
-                df['high'] = df['close']
-                df['low'] = df['close']
-                df = df.sort_values('date').reset_index(drop=True)
-                return df
-            else:
-                print(f"⚠️ akshare {etf_code} 数据不足，尝试 {attempt+1}/{retries}")
-        except Exception as e:
-            print(f"❌ akshare {etf_code} 失败（尝试 {attempt+1}/{retries}）: {e}")
-        time.sleep(2)
-    return None
-
-def fetch_etf_data_tencent(etf_code, days=600):
-    """腾讯财经备用数据源"""
-    try:
-        # 判断交易所前缀
-        if str(etf_code).startswith('51'):
-            sec_id = f"1.{etf_code}"  # 沪市
-        else:
-            sec_id = f"0.{etf_code}"  # 深市
-        
-        url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
-        params = {
-            'param': f'{sec_id},day,,,{days},qfq'
-        }
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        resp = requests.get(url, params=params, headers=headers, timeout=10)
-        data = resp.json()
-        if data and data['code'] == 0:
-            kline = data['data'][sec_id]['day']
-            df = pd.DataFrame(kline, columns=['date', 'open', 'close', 'high', 'low', 'volume', 'amount'])
-            df['date'] = pd.to_datetime(df['date'])
-            df['close'] = pd.to_numeric(df['close'])
-            df['high'] = pd.to_numeric(df['high'])
-            df['low'] = pd.to_numeric(df['low'])
-            df = df.sort_values('date').reset_index(drop=True)
-            return df
-    except Exception as e:
-        print(f"腾讯财经备用源获取 {etf_code} 失败: {e}")
-    return None
-
-def get_asset_data(asset):
-    """统一获取资产日线数据，多源保障"""
-    # 优先使用 akshare 直接获取基金净值
-    df = fetch_etf_data_akshare(asset["etf_code"])
-    if df is not None:
-        return df
-    
-    # akshare 失败，尝试腾讯财经备用
-    print(f"⚠️ akshare 失败，尝试腾讯备用源获取 {asset['etf_code']}")
-    df = fetch_etf_data_tencent(asset["etf_code"])
-    if df is not None:
-        return df
-    
-    # 最后尝试 baostock 指数数据（仅当有指数代码时）
-    if asset["index_code"]:
-        print(f"⚠️ 尝试 baostock 指数 {asset['index_code']} 作为最终备用")
-        df = fetch_index_data_baostock(asset["index_code"])
-        if df is not None:
-            return df
-    
-    return None
-
+# ====================== 计算 ADX ======================
 def calc_adx(df, period=14):
     high = df['high']
     low = df['low']
@@ -184,10 +132,11 @@ asset_momentums = []
 latest_date = None
 
 for asset in ASSETS:
-    df = get_asset_data(asset)
+    df = fetch_etf_data_tdx(asset["etf_code"], days=600)
     if df is None or len(df) < MOMENTUM_PERIOD + 1:
         print(f"警告：{asset['name']} 数据不足，跳过")
         continue
+    # 计算20日和10日涨幅
     df['return_20d'] = df['close'].pct_change(periods=MOMENTUM_PERIOD)
     df['return_10d'] = df['close'].pct_change(periods=10)
     latest = df.iloc[-1]
@@ -370,7 +319,7 @@ if best and best_etf != ETF_SAFE:
 else:
     suggested_position = "0%"
 
-# ====================== 读取干预建议 ======================
+# ====================== 读取干预建议（模拟版，可保留后续接入真实因子）======================
 def load_interventions(filename):
     if not os.path.exists(filename):
         return []
@@ -381,12 +330,10 @@ def load_interventions(filename):
     except:
         return []
 
-# 模拟版三因子（如需真实数据源可后续替换）
 news = load_interventions('news_interventions.json')
 north = load_interventions('north_interventions.json')
 flow = load_interventions('flow_interventions.json')
 commodity = load_interventions('commodity_interventions.json')
-
 all_suggestions = news + north + flow + commodity
 
 asset_groups = defaultdict(list)
