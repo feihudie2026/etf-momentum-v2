@@ -122,7 +122,7 @@
 
     <div class="health-bar">
         <span class="health-text">🧠 策略状态：警告</span>
-        <span class="health-score">25 分</span>
+        <span class="health-score">15 分</span>
     </div>
     <div class="advice-box">
         ⚠️ 策略可能失效，建议暂停交易，进入观察模式！<br>
@@ -142,15 +142,15 @@
         <div style="font-weight:600; margin-bottom:8px;">🛡️ 过滤条件</div>
         <div class="filter-item">
             <span>市场状态 (ADX)</span>
-            <span style="color:#991b1b;">21.8 ❌震荡</span>
+            <span style="color:#991b1b;">无数据</span>
         </div>
         <div class="filter-item">
             <span>买入阈值 >8%</span>
-            <span style="color:#991b1b;">最强 22.7% 无</span>
+            <span style="color:#991b1b;">无数据</span>
         </div>
         <div class="filter-item">
             <span>卖出阈值 <2%</span>
-            <span style="color:#991b1b;">22.7% ❌空仓</span>
+            <span style="color:#991b1b;">无数据</span>
         </div>
     </div>
 
@@ -161,7 +161,7 @@
         <div style="font-weight:600; margin-bottom:10px;">📋 各品种动量排序（调整后）</div>
         <table>
             <tr><th>品种</th><th>20日涨幅</th><th>10日涨幅</th><th>调整后</th><th>状态</th></tr>
-            <tr class=""><td>中韩半导体ETF</td><td class="positive">22.70%</td><td class="positive">7.22%</td><td>22.70%</td><td></td></tr><tr class=""><td>电网设备ETF</td><td class="positive">21.00%</td><td class="positive">10.73%</td><td>21.00%</td><td></td></tr><tr class=""><td>油气产业ETF</td><td class="positive">19.26%</td><td class="positive">6.38%</td><td>19.26%</td><td></td></tr><tr class=""><td>黄金ETF</td><td class="positive">10.58%</td><td class="positive">0.05%</td><td>10.58%</td><td></td></tr><tr class=""><td>有色金属ETF</td><td class="positive">8.27%</td><td class="positive">0.84%</td><td>8.27%</td><td></td></tr><tr class=""><td>红利低波ETF</td><td class="positive">2.58%</td><td class="positive">0.78%</td><td>2.58%</td><td></td></tr><tr class=""><td>沪深300ETF</td><td class="positive">1.80%</td><td class="negative">-0.70%</td><td>1.80%</td><td></td></tr><tr class=""><td>黄金股ETF</td><td class="positive">1.46%</td><td class="negative">-1.91%</td><td>1.46%</td><td></td></tr><tr class=""><td>创业板50ETF</td><td class="positive">0.78%</td><td class="negative">-0.39%</td><td>0.78%</td><td></td></tr><tr class=""><td>医疗器械ETF</td><td class="negative">0.00%</td><td class="negative">-1.18%</td><td>0.00%</td><td></td></tr><tr class=""><td>机器人ETF</td><td class="negative">-0.67%</td><td class="negative">-3.71%</td><td>-0.67%</td><td></td></tr><tr class=""><td>人工智能ETF</td><td class="negative">-2.62%</td><td class="positive">0.65%</td><td>-2.62%</td><td></td></tr>
+            <tr><td colspan="5" style="text-align:center;">暂无有效资产数据</td></tr>
         </table>
     </div>
 
@@ -176,7 +176,9 @@
     <div class="intervention-area">
         <h4>💬 今日干预信息（复制后发给我）</h4>
         <div class="intervention-text" id="interventionText">【今日干预信息】
-- 沪深300：利多，建议因子 1.1，强度 4.0（north）</div>
+- 人工智能：利空，建议因子 0.9，强度 3.0（flow_sim）
+- 沪深300：利多，建议因子 1.1，强度 4.0（north）
+- 能源：利多，建议因子 1.2，强度 3.0（commodity_sim）</div>
         <button class="copy-btn" onclick="copyIntervention()">📋 复制提示词</button>
     </div>
 
