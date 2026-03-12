@@ -1,10 +1,10 @@
 [
   {
-    "asset": "能源",
-    "direction": "bear",
+    "asset": "黄金",
+    "direction": "bull",
     "strength": 3,
-    "factor": 0.83,
-    "reason": "模拟数据：原油价格下跌 4.1%",
+    "factor": 1.15,
+    "reason": "模拟数据：黄金价格上涨 2.3%",
     "source": "commodity_sim"
   }
 ]
