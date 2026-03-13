@@ -1,10 +1,10 @@
 [
   {
     "asset": "黄金",
-    "direction": "bull",
+    "direction": "bear",
     "strength": 3,
-    "factor": 1.15,
-    "reason": "模拟数据：黄金价格上涨 2.3%",
+    "factor": 0.87,
+    "reason": "模拟数据：黄金价格下跌 3.7%",
     "source": "commodity_sim"
   }
 ]
