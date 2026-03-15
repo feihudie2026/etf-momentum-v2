@@ -1,10 +1,10 @@
 [
   {
-    "asset": "电网设备",
-    "direction": "bear",
+    "asset": "半导体",
+    "direction": "bull",
     "strength": 3,
-    "factor": 0.9,
-    "reason": "模拟数据：电网设备板块资金净流出 0.8亿",
+    "factor": 1.1,
+    "reason": "模拟数据：半导体板块资金净流入 1.0亿",
     "source": "flow_sim"
   }
 ]
