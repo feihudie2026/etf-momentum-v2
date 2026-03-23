@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "asset": "黄金",
+    "direction": "bear",
+    "strength": 3,
+    "factor": 0.87,
+    "reason": "模拟数据：黄金价格下跌 3.0%",
+    "source": "commodity_sim"
+  }
+]
