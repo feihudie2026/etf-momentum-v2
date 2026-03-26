@@ -1,10 +1,1 @@
-[
-  {
-    "asset": "能源",
-    "direction": "bull",
-    "strength": 3,
-    "factor": 1.2,
-    "reason": "模拟数据：原油价格上涨 2.2%",
-    "source": "commodity_sim"
-  }
-]
+[]
