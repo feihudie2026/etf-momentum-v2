@@ -1,10 +1,1 @@
-[
-  {
-    "asset": "电网设备",
-    "direction": "bear",
-    "strength": 3,
-    "factor": 0.9,
-    "reason": "模拟数据：电网设备板块资金净流出 1.5亿",
-    "source": "flow_sim"
-  }
-]
+[]
