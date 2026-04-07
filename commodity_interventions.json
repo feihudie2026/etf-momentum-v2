@@ -4,7 +4,7 @@
     "direction": "bull",
     "strength": 3,
     "factor": 1.15,
-    "reason": "模拟数据：黄金价格上涨 2.8%",
+    "reason": "模拟数据：黄金价格上涨 1.8%",
     "source": "commodity_sim"
   }
 ]
