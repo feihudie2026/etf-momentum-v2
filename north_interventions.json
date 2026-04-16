@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "asset": "沪深300",
+    "direction": "bull",
+    "strength": 4,
+    "factor": 1.1,
+    "reason": "北向资金成交活跃，5日平均成交额 3200 亿",
+    "source": "north"
+  }
+]
