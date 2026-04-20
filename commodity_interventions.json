@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "asset": "有色金属",
+    "direction": "bear",
+    "strength": 3,
+    "factor": 0.83,
+    "reason": "模拟数据：铜价格下跌 4.2%",
+    "source": "commodity_sim"
+  }
+]
