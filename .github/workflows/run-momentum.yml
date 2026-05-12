@@ -1,33 +1,34 @@
 name: Run Momentum Strategy
+
 on:
   schedule:
     - cron: '30 6 * * *'   # 每天北京时间 14:30
   workflow_dispatch:
+
 jobs:
   run:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-python@v2
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
         with:
           python-version: '3.9'
+
       - name: Install dependencies
         run: |
-          pip install pandas numpy baostock requests akshare  mootdx
-      - name: Fetch north flow interventions
-        run: python north_fetcher.py
-      - name: Fetch ETF flow interventions
-        run: python flow_fetcher.py
-      - name: Fetch commodity interventions
-        run: python commodity_fetcher.py
+          pip install pandas numpy akshare
+
       - name: Run momentum script
         run: python momentum.py
+
       - name: Commit and push if changes
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add docs/index.html docs/signals.csv events_config.json \
-                north_interventions.json flow_interventions.json commodity_interventions.json
-          git diff --staged --quiet || (git commit -m 'Update signals and interventions' && git push)
+          git add docs/index.html docs/signals.csv
+          git diff --staged --quiet || (git commit -m 'Update ETF monitor' && git push)
