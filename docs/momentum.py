@@ -2,6 +2,7 @@
 """
 科创50ETF回调监控 (ATR倍数)
 数据源: AKShare
+输出: docs/index.html
 """
 
 import akshare as ak
@@ -14,7 +15,7 @@ ETF_CODE = "588000"           # 科创50ETF代码
 ETF_NAME = "科创50ETF"        # 显示名称
 LOOKBACK_HIGH = 60            # 高点观察周期（日）
 ATR_PERIOD = 14               # ATR计算周期
-OUTPUT_HTML = "docs/index.html"   # 输出网页路径（兼容原系统）
+OUTPUT_HTML = "docs/index.html"   # 输出网页路径
 
 # ====================== 数据获取 ======================
 def fetch_etf_data(etf_code, days=200):
@@ -55,42 +56,47 @@ def calculate_atr(df, period=14):
     atr = tr.rolling(window=period).mean()
     return atr
 
-# ====================== 获取数据并计算 ======================
-df = fetch_etf_data(ETF_CODE, days=LOOKBACK_HIGH + ATR_PERIOD + 20)
-if df is None or len(df) < LOOKBACK_HIGH + ATR_PERIOD:
-    print("数据不足，无法计算")
-    exit()
+# ====================== 主程序 ======================
+def main():
+    print("="*50)
+    print("科创50ETF 回调监控 (ATR策略)")
+    print("数据源: AKShare")
+    print("="*50)
+    
+    df = fetch_etf_data(ETF_CODE, days=LOOKBACK_HIGH + ATR_PERIOD + 20)
+    if df is None or len(df) < LOOKBACK_HIGH + ATR_PERIOD:
+        print("数据不足，无法计算")
+        return
 
-# 计算60日最高价
-df['high_60d'] = df['close'].rolling(window=LOOKBACK_HIGH).max()
-# 计算ATR
-df['atr'] = calculate_atr(df, ATR_PERIOD)
-# 当前最新数据
-latest = df.iloc[-1]
-current_price = latest['close']
-high_60d = latest['high_60d']
-current_atr = latest['atr']
-# 回调幅度（从高点下跌的金额）
-drawdown = high_60d - current_price
-# 回调ATR倍数
-atr_drawdown_ratio = drawdown / current_atr if current_atr != 0 else 0
+    # 计算60日最高价（滚动窗口）
+    df['high_60d'] = df['close'].rolling(window=LOOKBACK_HIGH).max()
+    # 计算ATR
+    df['atr'] = calculate_atr(df, ATR_PERIOD)
+    
+    # 最新数据
+    latest = df.iloc[-1]
+    current_price = latest['close']
+    high_60d = latest['high_60d']
+    current_atr = latest['atr']
+    drawdown = high_60d - current_price
+    atr_drawdown_ratio = drawdown / current_atr if current_atr != 0 else 0
 
-# ====================== 生成信号建议 ======================
-if atr_drawdown_ratio >= 2.0:
-    signal_level = "strong_buy"
-    signal_text = "超卖，可考虑买入"
-    signal_advice = f"从高点回调 {drawdown:.3f} 元，相当于 {atr_drawdown_ratio:.1f} 倍ATR，处于深度超卖区域，可分批建仓。"
-elif atr_drawdown_ratio >= 1.0:
-    signal_level = "buy"
-    signal_text = "关注回调"
-    signal_advice = f"从高点回调 {drawdown:.3f} 元，相当于 {atr_drawdown_ratio:.1f} 倍ATR，接近超卖，可关注止跌信号。"
-else:
-    signal_level = "hold"
-    signal_text = "正常区间"
-    signal_advice = f"回调幅度 {atr_drawdown_ratio:.1f} 倍ATR，未达超卖阈值，建议观望。"
+    # 信号判断
+    if atr_drawdown_ratio >= 2.0:
+        signal_level = "strong_buy"
+        signal_text = "超卖，可考虑买入"
+        signal_advice = f"从高点回调 {drawdown:.3f} 元，相当于 {atr_drawdown_ratio:.1f} 倍ATR，处于深度超卖区域，可分批建仓。"
+    elif atr_drawdown_ratio >= 1.0:
+        signal_level = "buy"
+        signal_text = "关注回调"
+        signal_advice = f"从高点回调 {drawdown:.3f} 元，相当于 {atr_drawdown_ratio:.1f} 倍ATR，接近超卖，可关注止跌信号。"
+    else:
+        signal_level = "hold"
+        signal_text = "正常区间"
+        signal_advice = f"回调幅度 {atr_drawdown_ratio:.1f} 倍ATR，未达超卖阈值，建议观望。"
 
-# ====================== 生成HTML网页 ======================
-html_content = f"""<!DOCTYPE html>
+    # 生成HTML网页
+    html_content = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -240,17 +246,22 @@ html_content = f"""<!DOCTYPE html>
 </html>
 """
 
-# 写入HTML文件
-with open(OUTPUT_HTML, 'w', encoding='utf-8') as f:
-    f.write(html_content)
+    # 写入文件
+    import os
+    os.makedirs('docs', exist_ok=True)
+    with open(OUTPUT_HTML, 'w', encoding='utf-8') as f:
+        f.write(html_content)
 
-# 打印结果到控制台（供查看）
-print("="*50)
-print(f"{ETF_NAME} 回调监控报告")
-print(f"当前价格: {current_price:.3f}")
-print(f"{LOOKBACK_HIGH}日最高价: {high_60d:.3f}")
-print(f"ATR({ATR_PERIOD}): {current_atr:.3f}")
-print(f"回调幅度: {drawdown:.3f} 元")
-print(f"回调ATR倍数: {atr_drawdown_ratio:.1f}x")
-print(f"信号: {signal_text}")
-print("="*50)
+    # 打印到控制台
+    print(f"\n{ETF_NAME} 回调监控报告")
+    print(f"当前价格: {current_price:.3f}")
+    print(f"{LOOKBACK_HIGH}日最高价: {high_60d:.3f}")
+    print(f"ATR({ATR_PERIOD}): {current_atr:.3f}")
+    print(f"回调幅度: {drawdown:.3f} 元")
+    print(f"回调ATR倍数: {atr_drawdown_ratio:.1f}x")
+    print(f"信号: {signal_text}")
+    print("="*50)
+    print(f"网页已生成: {OUTPUT_HTML}")
+
+if __name__ == "__main__":
+    main()
